@@ -3,3 +3,7 @@ node_modules
 .env*.local
 .DS_Store
 *.log
+.vercel
+pnpm-lock.yaml
+pnpm-workspace.yaml
+tsconfig.tsbuildinfo

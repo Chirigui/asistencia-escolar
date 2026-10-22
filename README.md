@@ -2,6 +2,8 @@
 
 Plataforma de software completa, moderna y segura para el control y registro de asistencia escolar en tiempo real mediante códigos QR proyectados en aula. Diseñada para instituciones educativas con padrones de 800 a 1.000+ estudiantes.
 
+Requiere **Node.js 22 o superior** (`.nvmrc` fija 22). Los registros públicos no tienen acceso directo a tablas ni al RPC: `/api/attendance/register` valida el código y documento y llama al RPC desde el servidor con `service_role`. Los perfiles nuevos reciben el rol `teacher`; la importación masiva requiere `admin`. Docentes solo consultan y administran sus propias sesiones.
+
 ---
 
 ## 1. Arquitectura Técnica
@@ -62,8 +64,8 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 ### Paso 1: Configurar Proyecto en Supabase
 1. Ingresa a [https://supabase.com](https://supabase.com) y crea un nuevo proyecto (selecciona la región más cercana a tu país, ej. `sa-east-1` o `us-east-1`).
 2. Abre la sección **SQL Editor** en la consola de Supabase.
-3. Copia y ejecuta todo el contenido de [`supabase/schema.sql`](./supabase/schema.sql). Esto creará las tablas, índices, restricciones únicas de concurrencia y las políticas de seguridad (RLS).
-4. Opcionalmente, ejecuta [`supabase/seed.sql`](./supabase/seed.sql) para cargar estudiantes de prueba de los grados 10 y 11.
+3. Para una base nueva, ejecuta [`supabase/schema.sql`](./supabase/schema.sql). Para una base existente, aplica en orden los archivos `supabase/migrations/001_*.sql` a `007_*.sql` una sola vez mediante Supabase CLI (`supabase migration up`) o SQL Editor. No ejecutes `schema.sql` encima de datos existentes como sustituto de migraciones.
+4. Opcionalmente, ejecuta [`supabase/seed.sql`](./supabase/seed.sql) **solo en desarrollo/local**; crea estudiantes y sesiones de demostración finalizadas.
 5. En **Authentication > Users**, haz clic en **Add user** -> **Create user** para crear el usuario docente inicial (ejemplo: `profesor@colegio.edu.co` con su contraseña).
 6. Ve a **Project Settings > API** y copia:
    - `Project URL`
@@ -85,7 +87,9 @@ Plataforma de software completa, moderna y segura para el control y registro de 
    ```
 4. Instala las dependencias y corre las pruebas:
    ```bash
-   npm install
+   npm ci
+   npx tsc --noEmit
+   npm run lint
    npm test
    ```
 5. Inicia el servidor de desarrollo:
@@ -106,6 +110,7 @@ Plataforma de software completa, moderna y segura para el control y registro de 
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `NEXT_PUBLIC_APP_URL`: La URL definitiva de Vercel (ejemplo: `https://asistencia-colegio.vercel.app`).
+   - `NEXT_PUBLIC_SCHOOL_NAME`: nombre que se muestra en la pantalla de asistencia.
 5. Haz clic en **Deploy**. Vercel compilará la aplicación y la dejará disponible en segundos con CDN global y certificados SSL automáticos.
 
 ---
@@ -124,6 +129,7 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 2. En la pestaña **Clases y QR**, pulsa **Nueva Clase** e indica la materia, grupo y horario.
 3. Al hacer clic en la sesión, se abre el **Modo Proyector**:
    - Muestra el **código QR gigante** de alta nitidez para que los estudiantes lo escaneen desde sus asientos.
+   - El modo `/profesor/sesion/[id]/proyector` mantiene el QR fijo y actualiza conteos cada 5 segundos.
    - Panel lateral con conteo en vivo de **Presentes** y **Ausentes**.
    - Permite marcar **Presente manual** con un solo clic para alumnos que no tengan celular o tengan dificultades.
    - Botón para **Cerrar Asistencia** en cualquier momento, impidiendo registros tardíos.
@@ -141,6 +147,15 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 - **Integridad y Cero Duplicados:** Restricción de base de datos `UNIQUE (session_id, student_id)` y procedimiento almacenado atómico con `ON CONFLICT DO NOTHING`. Imposible registrar duplicados incluso con cientos de clics simultáneos.
 - **Seguridad Real (RLS):** Las claves maestras nunca bajan al navegador del estudiante. Toda operación administrativa exige sesión autenticada con JWT criptográfico.
 - **Códigos QR Nativos:** Generados directamente en el servidor sin intermediarios como QuickChart, eliminando puntos de fallo externos y garantizando privacidad institucional.
+
+### Configuración de seguridad que debe revisarse en Supabase
+- Desactiva **Authentication > Settings > User Signups** si el colegio crea cuentas solo por invitación. En cualquier caso, el registro de asistencia es independiente de la creación de cuentas Auth.
+- Comprueba **Project Settings > API > Max Rows** y conserva un límite razonable; los reportes y exportaciones de la app ya paginan explícitamente.
+- La tasa de intentos públicos se limita en PostgreSQL por sesión/documento e IP. El umbral por IP es intencionalmente generoso para redes escolares compartidas; la tabla de límites usa retención oportunista y no reemplaza un WAF ante ataques distribuidos.
+- Las migraciones agregadas endurecen las ACL del RPC; solo `service_role` puede ejecutarlo. No compartas esa clave fuera del servidor.
+
+### Integración heredada de Apps Script
+`Codigo.js`, `Index.html` y `PanelProfesor.html` son archivos de referencia histórica; no forman parte de la aplicación Next.js. Si se conserva el historial de Git, moverlos a una rama de archivo antes de quitarlos de la rama principal.
 
 ### Análisis de Costos y Cuotas para 800 - 1.000 Estudiantes:
 - **Nivel Inicial (Gratuito):**
