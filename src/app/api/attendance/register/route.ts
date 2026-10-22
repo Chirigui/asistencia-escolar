@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizeDocument } from "@/lib/utils";
+import { readJson, registerAttendanceSchema } from "@/lib/validation";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const { sessionCode, document } = body;
-
-    if (!sessionCode || !document) {
+    const parsed = await readJson(request, registerAttendanceSchema);
+    if (!parsed.success) {
       return NextResponse.json(
-        { success: false, message: "Código de sesión y documento son requeridos." },
+        { success: false, message: "Código de sesión o documento inválidos." },
         { status: 400 }
       );
     }
+    const { sessionCode, document } = parsed.data;
 
     const docNorm = normalizeDocument(document);
     const codeNorm = String(sessionCode).trim().toUpperCase();
