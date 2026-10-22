@@ -8,7 +8,7 @@ import QRCode from "qrcode";
 export async function generateQrDataUrl(text: string): Promise<string> {
   try {
     return await QRCode.toDataURL(text, {
-      errorCorrectionLevel: "H",
+      errorCorrectionLevel: "M",
       margin: 2,
       width: 450,
       color: {
