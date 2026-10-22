@@ -1,15 +1,12 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { normalizeGroupText } from "@/lib/utils";
 
 export async function GET(request: Request) {
   try {
-    const supabase = createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ success: false, message: "No autorizado." }, { status: 401 });
-    }
+    const auth = await requireUser();
+    if (auth.response) return auth.response;
 
     const { searchParams } = new URL(request.url);
     const dateFrom = searchParams.get("dateFrom");
@@ -17,6 +14,8 @@ export async function GET(request: Request) {
     const groupName = searchParams.get("groupName");
     const subject = searchParams.get("subject");
     const document = searchParams.get("document");
+    const page = Math.max(1, Number(searchParams.get("page") || 1));
+    const pageSize = Math.min(500, Math.max(1, Number(searchParams.get("pageSize") || 100)));
 
     const adminDb = createAdminClient();
 
@@ -43,17 +42,21 @@ export async function GET(request: Request) {
           group_name,
           date
         )
-      `)
+      `, { count: "exact" })
       .order("registered_at", { ascending: false });
 
     if (dateFrom) {
       query = query.gte("session.date", dateFrom);
     }
+    if (auth.user.role !== "admin") query = query.eq("session.teacher_id", auth.user.id);
     if (dateTo) {
       query = query.lte("session.date", dateTo);
     }
     if (groupName) {
-      query = query.eq("session.group_name", groupName.trim());
+      const normalizedGroup = normalizeGroupText(groupName);
+      const { data: variants } = await adminDb.rpc("get_group_name_variants", { p_group_name: normalizedGroup });
+      const names = (variants || []).map((row: { group_name: string }) => row.group_name);
+      query = names.length ? query.in("session.group_name", names) : query.eq("session.group_name", normalizedGroup);
     }
     if (subject) {
       query = query.ilike("session.subject", `%${subject.trim()}%`);
@@ -62,10 +65,11 @@ export async function GET(request: Request) {
       query = query.eq("student.document_normalized", document.trim());
     }
 
-    const { data, error } = await query.limit(1000);
+    const { data, error, count } = await query.range((page - 1) * pageSize, page * pageSize - 1);
 
     if (error) {
-      return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+      console.error("Error consultando reportes:", error);
+      return NextResponse.json({ success: false, message: "No se pudieron cargar los reportes." }, { status: 500 });
     }
 
     const uniqueStudents = new Set<string>();
@@ -94,13 +98,17 @@ export async function GET(request: Request) {
     return NextResponse.json({
       success: true,
       stats: {
-        totalRecords: rows.length,
+        totalRecords: count ?? 0,
         uniqueStudents: uniqueStudents.size,
         uniqueSessions: uniqueSessions.size,
       },
+      page,
+      pageSize,
+      hasMore: page * pageSize < (count ?? 0),
       rows,
     });
   } catch (err: any) {
-    return NextResponse.json({ success: false, message: err.message }, { status: 500 });
+    console.error("Error consultando reportes:", err);
+    return NextResponse.json({ success: false, message: "No se pudieron cargar los reportes." }, { status: 500 });
   }
 }

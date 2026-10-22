@@ -1,5 +1,5 @@
 -- ============================================================================
--- SEMILLA DE DATOS DE PRUEBA (SEED)
+-- SOLO DESARROLLO / ENTORNO LOCAL. NO ejecutar en producción.
 -- Colección de estudiantes (Grados 10 y 11, Grupos A y B) y Sesión de prueba
 -- ============================================================================
 
@@ -22,9 +22,9 @@ VALUES
   ('1000000015', '1000000015', 'Alejandro Quintero Londoño', '11', '11B', 'ACTIVO')
 ON CONFLICT (document_normalized) DO NOTHING;
 
--- Crear una sesión de prueba para hoy
+-- Sesiones de prueba con horario acotado (no dejar abiertas todo el día).
 INSERT INTO public.sessions (code, subject, group_name, date, start_time, end_time, status)
 VALUES
-  ('S001', 'Matemáticas Avanzadas', '10A', CURRENT_DATE, '00:00:00', '23:59:59', 'ABIERTA'),
-  ('S002', 'Física Mecánica', '10B', CURRENT_DATE, '00:00:00', '23:59:59', 'ABIERTA')
+  ('S001', 'Matemáticas Avanzadas', '10A', CURRENT_DATE, '08:00:00', '09:00:00', 'FINALIZADA'),
+  ('S002', 'Física Mecánica', '10B', CURRENT_DATE, '09:15:00', '10:15:00', 'FINALIZADA')
 ON CONFLICT (code) DO NOTHING;

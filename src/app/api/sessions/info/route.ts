@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 
     const { data: session, error } = await supabase
       .from("sessions")
-      .select("id, code, subject, group_name, date, start_time, end_time, status")
+      .select("code, subject, group_name, date, start_time, end_time, status")
       .eq("code", code.toUpperCase().trim())
       .single();
 
@@ -43,7 +43,7 @@ export async function GET(request: Request) {
     });
   } catch (err: any) {
     return NextResponse.json(
-      { success: false, message: "Error interno del servidor.", error: err.message },
+      { success: false, message: "Error interno del servidor." },
       { status: 500 }
     );
   }

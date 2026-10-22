@@ -1,29 +1,23 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { normalizeDocument } from "@/lib/utils";
+import { normalizeDocument, normalizeGroupText } from "@/lib/utils";
+import { manualAttendanceSchema, readJson } from "@/lib/validation";
 
 export async function POST(request: Request) {
   try {
-    const supabase = createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const auth = await requireUser();
+    if (auth.response) return auth.response;
 
-    if (authError || !user) {
-      return NextResponse.json({ success: false, message: "No autorizado." }, { status: 401 });
-    }
-
-    const body = await request.json();
-    const { sessionId, document, status = "PRESENTE", notes } = body;
-
-    if (!sessionId || !document) {
-      return NextResponse.json(
-        { success: false, message: "ID de sesión y documento requeridos." },
-        { status: 400 }
-      );
-    }
+    const parsed = await readJson(request, manualAttendanceSchema);
+    if (!parsed.success) return NextResponse.json({ success: false, message: "Datos de marcación inválidos." }, { status: 400 });
+    const { sessionId, document, status, notes } = parsed.data;
 
     const docNorm = normalizeDocument(document);
     const adminDb = createAdminClient();
+    const { data: session } = await adminDb.from("sessions").select("id, teacher_id, group_name").eq("id", sessionId).single();
+    if (!session) return NextResponse.json({ success: false, message: "Sesión no encontrada." }, { status: 404 });
+    if (auth.user.role !== "admin" && session.teacher_id !== auth.user.id) return NextResponse.json({ success: false, message: "No tienes permiso para modificar esta sesión." }, { status: 403 });
 
     // 1. Buscar estudiante
     const { data: student, error: stError } = await adminDb
@@ -38,19 +32,18 @@ export async function POST(request: Request) {
         { status: 404 }
       );
     }
+    if (normalizeGroupText(student.group_name) !== normalizeGroupText(session.group_name)) {
+      return NextResponse.json({ success: false, message: "El estudiante no pertenece al grupo de esta sesión." }, { status: 400 });
+    }
 
     // 2. Insertar asistencia manual
-    const { data: attendance, error: attError } = await adminDb
-      .from("attendances")
-      .insert({
-        session_id: sessionId,
-        student_id: student.id,
-        status: status,
-        method: "MANUAL",
-        notes: notes || "Marcado manual por profesor",
-      })
-      .select()
-      .single();
+    const { data: attendance, error: attError } = await adminDb.rpc("mark_attendance_manual", {
+      p_session_id: sessionId,
+      p_student_id: student.id,
+      p_status: status,
+      p_notes: typeof notes === "string" ? notes.trim() || null : "Marcado manual por profesor",
+      p_actor_id: auth.user.id,
+    });
 
     if (attError) {
       if (attError.code === "23505") {
@@ -65,21 +58,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // Registrar incidencia de auditoría
-    await adminDb.from("incidents").insert({
-      session_id: sessionId,
-      student_id: student.id,
-      document_attempted: docNorm,
-      incident_type: "REGISTRO_MANUAL_DOCENTE",
-      details: notes ? `Motivo: ${notes}` : "Marcado manual en panel docente",
-    });
-
     return NextResponse.json({
       success: true,
       message: `Asistencia de ${student.full_name} registrada con éxito.`,
       attendance,
     });
   } catch (err: any) {
-    return NextResponse.json({ success: false, message: err.message }, { status: 500 });
+    console.error("Error registrando asistencia manual:", err);
+    return NextResponse.json({ success: false, message: "No se pudo registrar la asistencia manual." }, { status: 500 });
   }
 }
