@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeDocument, normalizeGroupText } from "../src/lib/utils.ts";
+import { getSchoolDate, normalizeDocument, normalizeGroupText } from "../src/lib/utils.ts";
+import { escapeCsvCell, formatBogotaTime, toCsv } from "../src/lib/csv.ts";
+import { validateStudentImportRows } from "../src/lib/student-import.ts";
 
 test("Normalización de Documentos de Identidad", async (t) => {
   await t.test("debe eliminar espacios, puntos y guiones", () => {
@@ -23,26 +25,29 @@ test("Normalización de Grados y Grupos", async (t) => {
   });
 });
 
-test("Validación de Detección de Duplicados en Importación", async (t) => {
-  const existingDocs = new Set(["1000000001", "1000000002"]);
-  const incomingRows = [
-    { document: "1.000.000.001", name: "Estudiante 1", grade: "10", group: "10A" },
-    { document: "1000000003", name: "Estudiante 3", grade: "10", group: "10A" },
-    { document: "1000000003", name: "Estudiante 3 Repetido", grade: "10", group: "10A" },
+test("La fecha escolar usa America/Bogota", () => {
+  assert.strictEqual(getSchoolDate(new Date("2026-10-23T02:00:00.000Z")), "2026-10-22");
+});
+
+test("CSV escapa comillas y neutraliza fórmulas", () => {
+  assert.strictEqual(escapeCsvCell('"Ana"'), '"""Ana"""');
+  assert.strictEqual(escapeCsvCell("=1+1"), "\"'=1+1\"");
+  assert.ok(toCsv([["Nombre"], ['Ana "Ríos"']]).includes('"Ana ""Ríos"""'));
+});
+
+test("Hora de registro se formatea en hora de Bogotá", () => {
+  assert.strictEqual(formatBogotaTime("2026-10-22T12:05:00.000Z"), "07:05");
+});
+
+test("La importación valida usando la misma lógica del endpoint", () => {
+  const rows = [
+    { document: "ABC-12345", fullName: "", grade: "10", groupName: "10-A" },
+    { document: "ABC12345", fullName: "Ana Ríos", grade: "10", groupName: "10-A" },
+    { document: "1000000001", fullName: "Estudiante existente", grade: "10", groupName: "10A" },
   ];
-
-  const seenInBatch = new Set<string>();
-  const results = incomingRows.map((row) => {
-    const docNorm = normalizeDocument(row.document);
-    let duplicate = false;
-    if (existingDocs.has(docNorm) || seenInBatch.has(docNorm)) {
-      duplicate = true;
-    }
-    seenInBatch.add(docNorm);
-    return { docNorm, duplicate };
-  });
-
-  assert.strictEqual(results[0].duplicate, true, "El estudiante existente en BD debe marcarse como duplicado");
-  assert.strictEqual(results[1].duplicate, false, "El nuevo estudiante debe aceptarse como válido");
-  assert.strictEqual(results[2].duplicate, true, "El estudiante duplicado en el mismo lote debe marcarse como duplicado");
+  const result = validateStudentImportRows(rows, new Set(["1000000001"]));
+  assert.equal(result.rows[0].valid, false);
+  assert.equal(result.rows[1].valid, true, "una fila inválida no debe reservar el documento");
+  assert.equal(result.rows[2].errors.includes("Ya existe en el sistema escolar"), true);
+  assert.equal(result.validCount, 1);
 });
