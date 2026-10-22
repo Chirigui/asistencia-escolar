@@ -1,118 +1,57 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { readJson, studentImportSchema } from "@/lib/validation";
+import { validateStudentImportRows } from "@/lib/student-import";
 import { normalizeDocument } from "@/lib/utils";
-
-interface StudentImportRow {
-  document: string;
-  fullName: string;
-  grade: string;
-  groupName: string;
-  status?: string;
-}
 
 export async function POST(request: Request) {
   try {
-    const supabase = createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const auth = await requireRole(["admin"]);
+    if (auth.response) return auth.response;
 
-    if (authError || !user) {
-      return NextResponse.json({ success: false, message: "No autorizado." }, { status: 401 });
-    }
-
-    const body = await request.json();
-    const { rows, dryRun = false } = body;
-
-    if (!Array.isArray(rows) || rows.length === 0) {
+    const parsed = await readJson(request, studentImportSchema);
+    if (!parsed.success) {
       return NextResponse.json(
-        { success: false, message: "No se proporcionaron filas para procesar." },
+        { success: false, message: "El archivo de importación no tiene un formato válido." },
         { status: 400 }
       );
     }
+    const { rows, dryRun } = parsed.data;
 
     const adminDb = createAdminClient();
 
-    // 1. Obtener documentos ya registrados en la base de datos
-    const { data: existingStudents } = await adminDb
-      .from("students")
-      .select("document_normalized");
+    const candidateDocuments = Array.from(new Set(rows
+      .map((row) => normalizeDocument(row.document || ""))
+      .filter((doc) => doc.length >= 5)));
+
+    // Consultar únicamente documentos presentes en este archivo.
+    const { data: existingStudents } = candidateDocuments.length
+      ? await adminDb.from("students").select("document_normalized").in("document_normalized", candidateDocuments)
+      : { data: [] };
 
     const existingDocs = new Set(existingStudents?.map((s) => s.document_normalized) || []);
-    const fileDocs = new Set<string>();
-
-    let validCount = 0;
-    let duplicateCount = 0;
-    let invalidCount = 0;
-
-    const validatedRows: any[] = [];
-    const validStudentsToInsert: any[] = [];
-
-    rows.forEach((row: StudentImportRow, index: number) => {
-      const docRaw = String(row.document || "").trim();
-      const docNorm = normalizeDocument(docRaw);
-      const name = String(row.fullName || "").trim();
-      const grade = String(row.grade || "").trim().toUpperCase();
-      const group = String(row.groupName || "").trim().toUpperCase();
-      const status = (String(row.status || "ACTIVO").trim().toUpperCase() as any) || "ACTIVO";
-
-      const errors: string[] = [];
-
-      if (!docNorm) errors.push("Documento vacío");
-      else if (docNorm.length < 5) errors.push("Documento demasiado corto (mín. 5 dígitos)");
-
-      if (!name) errors.push("Nombre vacío");
-      if (!grade) errors.push("Grado vacío");
-      if (!group) errors.push("Grupo vacío");
-
-      if (docNorm && fileDocs.has(docNorm)) errors.push("Duplicado en el mismo archivo");
-      if (docNorm && existingDocs.has(docNorm)) errors.push("Ya existe en el sistema escolar");
-
-      if (docNorm) fileDocs.add(docNorm);
-
-      const isValid = errors.length === 0;
-
-      if (isValid) {
-        validCount++;
-        validStudentsToInsert.push({
-          document: docRaw,
-          document_normalized: docNorm,
-          full_name: name,
-          grade,
-          group_name: group,
-          status: ["ACTIVO", "INACTIVO", "RETIRADO"].includes(status) ? status : "ACTIVO",
-        });
-      } else {
-        if (errors.some((e) => e.includes("existe") || e.includes("Duplicado"))) {
-          duplicateCount++;
-        } else {
-          invalidCount++;
-        }
-      }
-
-      validatedRows.push({
-        row: index + 1,
-        document: docRaw,
-        fullName: name,
-        grade,
-        groupName: group,
-        status,
-        valid: isValid,
-        errors,
-      });
-    });
+    const validation = validateStudentImportRows(rows, existingDocs);
+    const validatedRows = validation.rows;
+    const validStudentsToInsert = validatedRows.flatMap((row) => row.student ? [row.student] : []);
+    let insertedCount = 0;
 
     // 2. Si no es dryRun (previsualización), insertar las filas válidas
     if (!dryRun && validStudentsToInsert.length > 0) {
-      const { error: insertError } = await adminDb
-        .from("students")
-        .insert(validStudentsToInsert);
-
-      if (insertError) {
-        return NextResponse.json(
-          { success: false, message: "Error al guardar estudiantes: " + insertError.message },
-          { status: 500 }
-        );
+      let inserted = 0;
+      for (let offset = 0; offset < validStudentsToInsert.length; offset += 500) {
+        const batch = validStudentsToInsert.slice(offset, offset + 500);
+        const { data: insertedRows, error: insertError } = await adminDb
+          .from("students")
+          .upsert(batch, { onConflict: "document_normalized", ignoreDuplicates: true })
+          .select("id");
+        if (insertError) {
+          console.error("Error guardando lote de estudiantes:", insertError);
+          return NextResponse.json({ success: false, message: "Error al guardar estudiantes." }, { status: 500 });
+        }
+        inserted += insertedRows?.length || 0;
       }
+      insertedCount = inserted;
     }
 
     return NextResponse.json({
@@ -120,14 +59,16 @@ export async function POST(request: Request) {
       dryRun,
       summary: {
         total: rows.length,
-        valid: validCount,
-        duplicates: duplicateCount,
-        invalid: invalidCount,
-        inserted: dryRun ? 0 : validStudentsToInsert.length,
+        valid: validation.validCount,
+        duplicates: validation.duplicateCount,
+        invalid: validation.invalidCount,
+        inserted: insertedCount,
       },
-      preview: validatedRows.slice(0, 50), // Primeras 50 para vista previa rápida
+      preview: validatedRows.slice(0, 50).map(({ student: _student, ...row }) => row),
+      errors: validatedRows.filter((row) => !row.valid),
     });
   } catch (err: any) {
-    return NextResponse.json({ success: false, message: err.message }, { status: 500 });
+    console.error("Error importando estudiantes:", err);
+    return NextResponse.json({ success: false, message: "No se pudo procesar la importación." }, { status: 500 });
   }
 }

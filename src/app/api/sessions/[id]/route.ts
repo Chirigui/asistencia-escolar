@@ -1,19 +1,17 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateQrDataUrl } from "@/lib/qr";
+import { normalizeGroupText } from "@/lib/utils";
+import { readJson, sessionUpdateSchema } from "@/lib/validation";
 
 export async function GET(
   request: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ success: false, message: "No autorizado." }, { status: 401 });
-    }
+    const auth = await requireUser();
+    if (auth.response) return auth.response;
 
     const sessionId = params.id;
     const adminDb = createAdminClient();
@@ -28,6 +26,9 @@ export async function GET(
     if (sesError || !session) {
       return NextResponse.json({ success: false, message: "Sesión no encontrada." }, { status: 404 });
     }
+    if (auth.user.role !== "admin" && session.teacher_id !== auth.user.id) {
+      return NextResponse.json({ success: false, message: "No tienes permiso para consultar esta sesión." }, { status: 403 });
+    }
 
     // 2. Obtener asistencias registradas
     const { data: attendances } = await adminDb
@@ -38,6 +39,8 @@ export async function GET(
         status,
         method,
         notes,
+        marked_by,
+        marker:profiles!attendances_marked_by_fkey(full_name),
         student:students (
           id,
           document,
@@ -62,6 +65,7 @@ export async function GET(
         status: att.status,
         method: att.method,
         notes: att.notes,
+        markedBy: Array.isArray(att.marker) ? att.marker[0]?.full_name || null : att.marker?.full_name || null,
         document: student?.document || "",
         fullName: student?.full_name || "",
         grade: student?.grade || "",
@@ -70,11 +74,13 @@ export async function GET(
     });
 
     // 3. Obtener todos los estudiantes activos de este grupo para calcular ausentes
+    const { data: groupVariants } = await adminDb.rpc("get_group_name_variants", { p_group_name: normalizeGroupText(session.group_name) });
+    const names = (groupVariants || []).map((row: { group_name: string }) => row.group_name);
     const { data: groupStudents } = await adminDb
       .from("students")
       .select("id, document, document_normalized, full_name, grade, group_name")
       .eq("status", "ACTIVO")
-      .eq("group_name", session.group_name);
+      .in("group_name", names.length ? names : [session.group_name]);
 
     const absents: any[] = [];
     (groupStudents || []).forEach((st) => {
@@ -109,7 +115,8 @@ export async function GET(
       absents,
     });
   } catch (err: any) {
-    return NextResponse.json({ success: false, message: err.message }, { status: 500 });
+    console.error("Error consultando sesión:", err);
+    return NextResponse.json({ success: false, message: "No se pudo cargar la sesión." }, { status: 500 });
   }
 }
 
@@ -118,22 +125,20 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ success: false, message: "No autorizado." }, { status: 401 });
-    }
+    const auth = await requireUser();
+    if (auth.response) return auth.response;
 
     const sessionId = params.id;
-    const body = await request.json();
-    const { status } = body;
-
-    if (!["ABIERTA", "CERRADA", "FINALIZADA"].includes(status)) {
+    const parsed = await readJson(request, sessionUpdateSchema);
+    if (!parsed.success) {
       return NextResponse.json({ success: false, message: "Estado de sesión inválido." }, { status: 400 });
     }
+    const { status } = parsed.data;
 
     const adminDb = createAdminClient();
+    const { data: ownedSession } = await adminDb.from("sessions").select("teacher_id").eq("id", sessionId).single();
+    if (!ownedSession) return NextResponse.json({ success: false, message: "Sesión no encontrada." }, { status: 404 });
+    if (auth.user.role !== "admin" && ownedSession.teacher_id !== auth.user.id) return NextResponse.json({ success: false, message: "No tienes permiso para modificar esta sesión." }, { status: 403 });
     const { data: updated, error } = await adminDb
       .from("sessions")
       .update({ status, updated_at: new Date().toISOString() })
@@ -142,11 +147,13 @@ export async function PATCH(
       .single();
 
     if (error) {
-      return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+      console.error("Error actualizando sesión:", error);
+      return NextResponse.json({ success: false, message: "No se pudo actualizar la sesión." }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, session: updated });
   } catch (err: any) {
-    return NextResponse.json({ success: false, message: err.message }, { status: 500 });
+    console.error("Error actualizando sesión:", err);
+    return NextResponse.json({ success: false, message: "No se pudo actualizar la sesión." }, { status: 500 });
   }
 }

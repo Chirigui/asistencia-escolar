@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { getSchoolDate } from "@/lib/utils";
+import { formatBogotaTime } from "@/lib/csv";
 import {
   GraduationCap,
   PlusCircle,
@@ -53,6 +55,7 @@ export default function TeacherPanelPage() {
 
   // Estados de sesiones
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [groups, setGroups] = useState<string[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
 
   // Modal nueva clase
@@ -60,7 +63,7 @@ export default function TeacherPanelPage() {
   const [createForm, setCreateForm] = useState({
     subject: "",
     groupName: "10A",
-    date: new Date().toISOString().split("T")[0],
+    date: getSchoolDate(),
     startTime: "07:00",
     endTime: "08:30",
   });
@@ -68,21 +71,40 @@ export default function TeacherPanelPage() {
 
   // Modal detalle de sesión / Proyector QR
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!showCreateModal && !selectedSessionId) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (selectedSessionId) setSelectedSessionId(null);
+      else setShowCreateModal(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [showCreateModal, selectedSessionId]);
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [manualDocument, setManualDocument] = useState("");
   const [manualNote, setManualNote] = useState("");
+  const [manualStatus, setManualStatus] = useState("PRESENTE");
+  const [attendanceStatuses, setAttendanceStatuses] = useState<Record<string, string>>({});
+  const [attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
 
   // Estados de reportes
   const [reports, setReports] = useState<any[]>([]);
+  const [reportsTotal, setReportsTotal] = useState(0);
+  const [reportsPage, setReportsPage] = useState(1);
+  const [reportsHasMore, setReportsHasMore] = useState(false);
+  const [reportMode, setReportMode] = useState<"attendance" | "absences">("attendance");
   const [loadingReports, setLoadingReports] = useState(false);
   const [reportFilters, setReportFilters] = useState({
     dateFrom: "",
     dateTo: "",
     groupName: "",
     subject: "",
+    document: "",
   });
 
   // Estados de importación masiva
@@ -102,12 +124,37 @@ export default function TeacherPanelPage() {
         return;
       }
 
-      setUserProfile({ email: user.email });
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+      setUserProfile({ email: user.email, role: profile?.role || "teacher" });
       loadSessions();
+      const groupsResponse = await fetch("/api/groups");
+      const groupsData = await groupsResponse.json();
+      if (groupsData.success) {
+        setGroups(groupsData.groups || []);
+        if (groupsData.groups?.length && !groupsData.groups.includes(createForm.groupName)) {
+          setCreateForm((current) => ({ ...current, groupName: groupsData.groups[0] }));
+        }
+      }
     };
 
     checkAuthAndLoad();
   }, [router]);
+
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    const refreshStats = async () => {
+      try {
+        const res = await fetch(`/api/sessions/${selectedSessionId}/stats`, { cache: "no-store" });
+        const data = await res.json();
+        if (data.success) setSessionDetail((current) => current ? { ...current, stats: data.stats } : current);
+      } catch (err) {
+        console.error("No se pudieron actualizar los conteos de asistencia:", err);
+      }
+    };
+    void refreshStats();
+    const interval = setInterval(refreshStats, 5000);
+    return () => clearInterval(interval);
+  }, [selectedSessionId]);
 
   const loadSessions = async () => {
     try {
@@ -201,6 +248,7 @@ export default function TeacherPanelPage() {
         body: JSON.stringify({
           sessionId: selectedSessionId,
           document: doc,
+          status: manualStatus,
           notes: manualNote || "Marcado manual docente",
         }),
       });
@@ -208,6 +256,7 @@ export default function TeacherPanelPage() {
       if (data.success) {
         setManualDocument("");
         setManualNote("");
+        setManualStatus("PRESENTE");
         openSessionDetail(selectedSessionId);
         loadSessions();
       } else {
@@ -220,7 +269,25 @@ export default function TeacherPanelPage() {
     }
   };
 
-  const loadReports = async () => {
+  const saveAttendanceCorrection = async (attendanceId: string, currentStatus: string, currentNote: string) => {
+    const response = await fetch(`/api/attendance/${attendanceId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: attendanceStatuses[attendanceId] || currentStatus, notes: attendanceNotes[attendanceId] ?? currentNote }),
+    });
+    const result = await response.json();
+    if (!result.success) { alert(result.message || "No se pudo guardar la corrección."); return; }
+    if (selectedSessionId) openSessionDetail(selectedSessionId);
+  };
+
+  const undoAttendance = async (attendanceId: string) => {
+    if (!window.confirm("¿Deshacer esta marcación? La acción quedará registrada en la auditoría.")) return;
+    const response = await fetch(`/api/attendance/${attendanceId}`, { method: "DELETE" });
+    const result = await response.json();
+    if (!result.success) { alert(result.message || "No se pudo deshacer la marcación."); return; }
+    if (selectedSessionId) openSessionDetail(selectedSessionId);
+  };
+
+  const loadReports = async (page = 1, mode = reportMode) => {
     setLoadingReports(true);
     try {
       const params = new URLSearchParams();
@@ -228,11 +295,17 @@ export default function TeacherPanelPage() {
       if (reportFilters.dateTo) params.append("dateTo", reportFilters.dateTo);
       if (reportFilters.groupName) params.append("groupName", reportFilters.groupName);
       if (reportFilters.subject) params.append("subject", reportFilters.subject);
+      if (reportFilters.document) params.append("document", reportFilters.document);
+      params.set("page", String(page));
+      const endpoint = mode === "absences" ? "/api/reports/absences" : "/api/reports";
 
-      const res = await fetch(`/api/reports?${params.toString()}`);
+      const res = await fetch(`${endpoint}?${params.toString()}`);
       const data = await res.json();
       if (data.success) {
         setReports(data.rows || []);
+        setReportsTotal(data.stats?.totalRecords || 0);
+        setReportsPage(data.page || page);
+        setReportsHasMore(Boolean(data.hasMore));
       }
     } catch (err) {
       console.error(err);
@@ -241,29 +314,19 @@ export default function TeacherPanelPage() {
     }
   };
 
-  const exportReportsCsv = () => {
-    if (reports.length === 0) return;
-    const headers = ["Sesion", "Fecha", "Hora", "Documento", "Estudiante", "Grado", "Grupo", "Materia", "Metodo"];
-    const rows = reports.map((r) => [
-      r.sessionCode,
-      r.date,
-      new Date(r.registeredAt).toLocaleTimeString(),
-      r.document,
-      `"${r.studentName}"`,
-      r.grade,
-      r.group,
-      `"${r.subject}"`,
-      r.method,
-    ]);
-    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const exportReportsCsv = async () => {
+    if (reportsTotal === 0) return;
+    const params = new URLSearchParams({ mode: reportMode });
+    Object.entries(reportFilters).forEach(([key, value]) => { if (value) params.set(key, value); });
+    const response = await fetch(`/api/reports/csv?${params.toString()}`);
+    if (!response.ok) { alert("No se pudo descargar el reporte."); return; }
+    const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `reporte_asistencia_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
+    link.href = url;
+    link.download = `reporte_${reportMode}.csv`;
     link.click();
-    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handleParseAndImport = async (dryRun: boolean) => {
@@ -307,6 +370,18 @@ export default function TeacherPanelPage() {
     }
   };
 
+  const downloadImportErrors = () => {
+    const errors = importPreview?.errors || [];
+    if (errors.length === 0) return;
+    const blob = new Blob([JSON.stringify(errors, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "errores_importacion.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       {/* Barra de navegación superior */}
@@ -342,14 +417,14 @@ export default function TeacherPanelPage() {
             >
               Reportes
             </button>
-            <button
+            {userProfile?.role === "admin" && <button
               onClick={() => setActiveTab("importar")}
               className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
                 activeTab === "importar" ? "bg-blue-600 text-white shadow" : "text-slate-400 hover:text-white"
               }`}
             >
               Importar Matrícula
-            </button>
+            </button>}
           </nav>
 
           <button
@@ -469,7 +544,7 @@ export default function TeacherPanelPage() {
 
               <button
                 onClick={exportReportsCsv}
-                disabled={reports.length === 0}
+                disabled={reportsTotal === 0}
                 className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all text-white"
               >
                 <Download className="w-4 h-4" />
@@ -478,10 +553,11 @@ export default function TeacherPanelPage() {
             </div>
 
             {/* Filtros */}
-            <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+            <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl grid grid-cols-1 sm:grid-cols-6 gap-3 text-xs">
               <div>
-                <label className="block text-slate-400 mb-1">Fecha Desde</label>
+                <label htmlFor="report-date-from" className="block text-slate-400 mb-1">Fecha Desde</label>
                 <input
+                  id="report-date-from"
                   type="date"
                   value={reportFilters.dateFrom}
                   onChange={(e) => setReportFilters({ ...reportFilters, dateFrom: e.target.value })}
@@ -489,8 +565,9 @@ export default function TeacherPanelPage() {
                 />
               </div>
               <div>
-                <label className="block text-slate-400 mb-1">Fecha Hasta</label>
+                <label htmlFor="report-date-to" className="block text-slate-400 mb-1">Fecha Hasta</label>
                 <input
+                  id="report-date-to"
                   type="date"
                   value={reportFilters.dateTo}
                   onChange={(e) => setReportFilters({ ...reportFilters, dateTo: e.target.value })}
@@ -498,18 +575,28 @@ export default function TeacherPanelPage() {
                 />
               </div>
               <div>
-                <label className="block text-slate-400 mb-1">Grupo</label>
-                <input
-                  type="text"
-                  placeholder="Ej: 10A"
+                <label htmlFor="report-group" className="block text-slate-400 mb-1">Grupo</label>
+                <select
+                  id="report-group"
                   value={reportFilters.groupName}
                   onChange={(e) => setReportFilters({ ...reportFilters, groupName: e.target.value })}
                   className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-white"
-                />
+                >
+                  <option value="">Todos los grupos</option>
+                  {groups.map((group) => <option key={group} value={group}>{group}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="report-subject" className="block text-slate-400 mb-1">Materia</label>
+                <input id="report-subject" type="text" value={reportFilters.subject} onChange={(e) => setReportFilters({ ...reportFilters, subject: e.target.value })} className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-white" />
+              </div>
+              <div>
+                <label htmlFor="report-document" className="block text-slate-400 mb-1">Documento</label>
+                <input id="report-document" type="text" value={reportFilters.document} onChange={(e) => setReportFilters({ ...reportFilters, document: e.target.value })} className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-white" />
               </div>
               <div className="flex items-end">
                 <button
-                  onClick={loadReports}
+                  onClick={() => loadReports(1)}
                   className="w-full py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold text-white transition-colors"
                 >
                   Aplicar Filtros
@@ -521,8 +608,16 @@ export default function TeacherPanelPage() {
             <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
               <div className="p-4 border-b border-slate-800 flex items-center justify-between text-xs">
                 <span className="text-slate-400 font-medium">
-                  Total de registros encontrados: <strong className="text-white">{reports.length}</strong>
+                  Total de registros encontrados: <strong className="text-white">{reportsTotal}</strong>
                 </span>
+                <button onClick={() => { const next = reportMode === "attendance" ? "absences" : "attendance"; setReportMode(next); void loadReports(1, next); }} className="px-3 py-2 bg-slate-800 rounded-lg text-white">
+                  {reportMode === "attendance" ? "Ver inasistencias" : "Ver asistencias"}
+                </button>
+              </div>
+              {reportsHasMore && <p className="px-4 pb-3 text-xs text-amber-300">Hay más resultados. Usa “Siguiente página” para verlos.</p>}
+              <div className="px-4 pb-4 flex items-center justify-between text-xs">
+                <span>Página {reportsPage}</span>
+                <button disabled={!reportsHasMore} onClick={() => loadReports(reportsPage + 1)} className="px-3 py-2 rounded-lg bg-blue-600 disabled:opacity-40">Siguiente página</button>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs text-slate-300">
@@ -535,6 +630,7 @@ export default function TeacherPanelPage() {
                       <th className="p-3">Estudiante</th>
                       <th className="p-3">Grupo</th>
                       <th className="p-3">Materia</th>
+                      <th className="p-3">Estado</th>
                       <th className="p-3">Método</th>
                     </tr>
                   </thead>
@@ -543,11 +639,12 @@ export default function TeacherPanelPage() {
                       <tr key={row.id} className="hover:bg-slate-800/40 transition-colors">
                         <td className="p-3 font-mono font-bold text-blue-400">{row.sessionCode}</td>
                         <td className="p-3">{row.date}</td>
-                        <td className="p-3 font-mono">{new Date(row.registeredAt).toLocaleTimeString().slice(0, 5)}</td>
+                        <td className="p-3 font-mono">{row.registeredAt ? formatBogotaTime(row.registeredAt) : "—"}</td>
                         <td className="p-3 font-mono">{row.document}</td>
                         <td className="p-3 font-medium text-white">{row.studentName}</td>
                         <td className="p-3">{row.group}</td>
                         <td className="p-3">{row.subject}</td>
+                        <td className="p-3">{row.status}</td>
                         <td className="p-3">
                           <span
                             className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -563,7 +660,7 @@ export default function TeacherPanelPage() {
                     ))}
                     {reports.length === 0 && !loadingReports && (
                       <tr>
-                        <td colSpan={8} className="p-8 text-center text-slate-500">
+                        <td colSpan={10} className="p-8 text-center text-slate-500">
                           No hay registros que coincidan con la búsqueda.
                         </td>
                       </tr>
@@ -641,6 +738,8 @@ export default function TeacherPanelPage() {
                   </div>
                 </div>
 
+                {(importPreview.errors?.length || 0) > 0 && <button onClick={downloadImportErrors} className="text-xs text-amber-300 underline">Descargar {importPreview.errors.length} filas con errores</button>}
+
                 <div className="overflow-x-auto max-h-60 overflow-y-auto">
                   <table className="w-full text-left text-xs">
                     <thead className="bg-slate-950 text-slate-400 sticky top-0">
@@ -680,20 +779,23 @@ export default function TeacherPanelPage() {
       {/* MODAL: NUEVA CLASE */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative">
+          <div role="dialog" aria-modal="true" aria-labelledby="create-session-title" className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative">
             <button
+              type="button"
+              aria-label="Cerrar creación de clase"
               onClick={() => setShowCreateModal(false)}
               className="absolute right-4 top-4 text-slate-400 hover:text-white"
             >
               <X className="w-5 h-5" />
             </button>
-            <h3 className="text-lg font-bold mb-1">Crear Nueva Clase</h3>
+            <h3 id="create-session-title" className="text-lg font-bold mb-1">Crear Nueva Clase</h3>
             <p className="text-xs text-slate-400 mb-5">Define la asignatura y el grupo para generar el código QR.</p>
 
             <form onSubmit={handleCreateSession} className="space-y-4 text-xs">
               <div>
-                <label className="block text-slate-300 mb-1">Materia / Asignatura</label>
+                <label htmlFor="session-subject" className="block text-slate-300 mb-1">Materia / Asignatura</label>
                 <input
+                  id="session-subject"
                   type="text"
                   required
                   placeholder="Ej: Matemáticas Avanzadas"
@@ -705,19 +807,21 @@ export default function TeacherPanelPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 mb-1">Grupo</label>
-                  <input
-                    type="text"
+                  <label htmlFor="session-group" className="block text-slate-300 mb-1">Grupo</label>
+                  <select
+                    id="session-group"
                     required
-                    placeholder="Ej: 10A"
                     value={createForm.groupName}
                     onChange={(e) => setCreateForm({ ...createForm, groupName: e.target.value })}
                     className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white"
-                  />
+                  >
+                    {groups.map((group) => <option key={group} value={group}>{group}</option>)}
+                  </select>
                 </div>
                 <div>
-                  <label className="block text-slate-300 mb-1">Fecha</label>
+                  <label htmlFor="session-date" className="block text-slate-300 mb-1">Fecha</label>
                   <input
+                    id="session-date"
                     type="date"
                     required
                     value={createForm.date}
@@ -729,8 +833,9 @@ export default function TeacherPanelPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 mb-1">Hora Inicio</label>
+                  <label htmlFor="session-start" className="block text-slate-300 mb-1">Hora Inicio</label>
                   <input
+                    id="session-start"
                     type="time"
                     required
                     value={createForm.startTime}
@@ -739,8 +844,9 @@ export default function TeacherPanelPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 mb-1">Hora Fin</label>
+                  <label htmlFor="session-end" className="block text-slate-300 mb-1">Hora Fin</label>
                   <input
+                    id="session-end"
                     type="time"
                     required
                     value={createForm.endTime}
@@ -765,15 +871,18 @@ export default function TeacherPanelPage() {
       {/* MODAL: DETALLE DE SESIÓN / PROYECTOR QR */}
       {selectedSessionId && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-          <div className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative my-auto">
+          <div role="dialog" aria-modal="true" aria-labelledby="session-detail-title" className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative my-auto">
             <button
+              type="button"
+              aria-label="Cerrar detalle de sesión"
               onClick={() => setSelectedSessionId(null)}
               className="absolute right-4 top-4 text-slate-400 hover:text-white p-1"
             >
               <X className="w-6 h-6" />
             </button>
+            <h2 id="session-detail-title" className="sr-only">Detalle de sesión y asistencia</h2>
 
-            {loadingDetail || !sessionDetail ? (
+            {!sessionDetail ? (
               <div className="py-24 text-center text-slate-400 text-sm">Cargando detalles de la clase...</div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -799,6 +908,9 @@ export default function TeacherPanelPage() {
                   <p className="text-xs text-slate-400 mb-4">
                     Grupo <strong>{sessionDetail.session.group_name}</strong> · {sessionDetail.session.date}
                   </p>
+                  <a href={`/profesor/sesion/${selectedSessionId}/proyector`} target="_blank" rel="noreferrer" className="mb-4 inline-flex items-center gap-2 text-xs font-semibold text-blue-300 hover:text-blue-200">
+                    <ExternalLink className="h-4 w-4" /> Abrir modo proyector
+                  </a>
 
                   {/* QR Image nativa */}
                   <div className="p-3 bg-white rounded-2xl shadow-2xl mb-3">
@@ -838,7 +950,9 @@ export default function TeacherPanelPage() {
                       <p className="font-semibold text-slate-300 mb-2">Marcado Manual Docente</p>
                       <div className="flex gap-2">
                         <input
+                          id="manual-student-document"
                           type="text"
+                          aria-label="Documento del alumno para asistencia manual"
                           placeholder="Documento del alumno"
                           value={manualDocument}
                           onChange={(e) => setManualDocument(e.target.value)}
@@ -851,6 +965,12 @@ export default function TeacherPanelPage() {
                         >
                           Marcar
                         </button>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <select aria-label="Estado de asistencia manual" value={manualStatus} onChange={(e) => setManualStatus(e.target.value)} className="p-2 bg-slate-900 border border-slate-800 rounded-lg text-white">
+                          <option value="PRESENTE">Presente</option><option value="TARDE">Tarde</option><option value="JUSTIFICADO">Justificado</option>
+                        </select>
+                        <input aria-label="Nota para asistencia manual" value={manualNote} onChange={(e) => setManualNote(e.target.value)} placeholder="Nota opcional" className="p-2 bg-slate-900 border border-slate-800 rounded-lg text-white" />
                       </div>
                     </div>
 
@@ -875,13 +995,20 @@ export default function TeacherPanelPage() {
                             key={p.attendanceId}
                             className="p-2 bg-emerald-950/20 border border-emerald-500/20 rounded-xl flex items-center justify-between"
                           >
-                            <div>
+                            <div className="min-w-0">
                               <p className="font-bold text-emerald-300">{p.fullName}</p>
                               <p className="text-[10px] text-slate-500 font-mono">{p.document}</p>
+                              <p className="text-[10px] text-slate-400">{p.status} · {p.method}{p.markedBy ? ` · Marcó: ${p.markedBy}` : ""}</p>
+                              <input value={attendanceNotes[p.attendanceId] ?? p.notes ?? ""} onChange={(e) => setAttendanceNotes({ ...attendanceNotes, [p.attendanceId]: e.target.value })} placeholder="Nota" className="mt-1 w-full p-1.5 bg-slate-900 border border-slate-800 rounded text-white" />
                             </div>
-                            <span className="text-[10px] font-mono text-emerald-400">
-                              {new Date(p.registeredAt).toLocaleTimeString().slice(0, 5)}
-                            </span>
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="text-[10px] font-mono text-emerald-400">{formatBogotaTime(p.registeredAt)}</span>
+                              <select value={attendanceStatuses[p.attendanceId] || p.status} onChange={(e) => setAttendanceStatuses({ ...attendanceStatuses, [p.attendanceId]: e.target.value })} className="p-1 bg-slate-900 text-white rounded">
+                                <option value="PRESENTE">Presente</option><option value="TARDE">Tarde</option><option value="JUSTIFICADO">Justificado</option>
+                              </select>
+                              <button onClick={() => saveAttendanceCorrection(p.attendanceId, p.status, p.notes || "")} className="text-[10px] text-blue-300 underline">Guardar</button>
+                              <button onClick={() => undoAttendance(p.attendanceId)} className="text-[10px] text-rose-300 underline">Deshacer</button>
+                            </div>
                           </div>
                         ))}
 
