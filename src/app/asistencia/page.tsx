@@ -148,7 +148,7 @@ function StudentAttendanceForm() {
           </div>
           <div>
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Colegio San José
+              {process.env.NEXT_PUBLIC_SCHOOL_NAME || "Asistencia Escolar"}
             </h2>
             <p className="text-sm font-semibold text-white">Asistencia Escolar QR</p>
           </div>
@@ -205,8 +205,7 @@ function StudentAttendanceForm() {
             <input
               id="document"
               type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
+              inputMode="text"
               autoFocus
               required
               value={documentInput}
