@@ -7,13 +7,15 @@ export function cn(...inputs: ClassValue[]) {
 
 /**
  * Normaliza el documento de identidad de un estudiante:
- * Remueve espacios en blanco, guiones, puntos y símbolos especiales.
+ * Remueve espacios en blanco, guiones, puntos y símbolos especiales,
+ * y unifica a mayúsculas para que la búsqueda sea consistente.
  */
 export function normalizeDocument(doc: string | number): string {
   return String(doc || "")
     .trim()
     .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9]/g, "");
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toUpperCase();
 }
 
 /**

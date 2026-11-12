@@ -3,13 +3,11 @@
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import {
-  QrCode,
   CheckCircle2,
   AlertTriangle,
   XCircle,
   GraduationCap,
   Clock,
-  Sparkles,
   ArrowRight,
 } from "lucide-react";
 
@@ -44,10 +42,14 @@ function StudentAttendanceForm() {
   const searchParams = useSearchParams();
   const sessionCodeFromUrl = searchParams.get("sesion") || searchParams.get("s") || "";
 
-  const [sessionCode, setSessionCode] = useState(sessionCodeFromUrl.toUpperCase());
+  const sessionCode = sessionCodeFromUrl.toUpperCase();
   const [session, setSession] = useState<SessionInfo | null>(null);
-  const [loadingSession, setLoadingSession] = useState(true);
-  const [sessionError, setSessionError] = useState("");
+  const [loadingSession, setLoadingSession] = useState(Boolean(sessionCode));
+  const [sessionError, setSessionError] = useState(
+    sessionCode
+      ? ""
+      : "Por favor escanea el código QR de tu clase para registrarte."
+  );
 
   const [documentInput, setDocumentInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -73,11 +75,7 @@ function StudentAttendanceForm() {
 
   // Cargar info de sesión
   useEffect(() => {
-    if (!sessionCode) {
-      setLoadingSession(false);
-      setSessionError("Por favor escanea el código QR de tu clase para registrarte.");
-      return;
-    }
+    if (!sessionCode) return;
 
     const fetchSession = async () => {
       try {
@@ -92,7 +90,7 @@ function StudentAttendanceForm() {
           setSession(null);
           setSessionError(data.message || "La sesión no existe o no está disponible.");
         }
-      } catch (err) {
+      } catch {
         setSessionError("No fue posible contactar el servidor escolar.");
       } finally {
         setLoadingSession(false);
@@ -125,7 +123,7 @@ function StudentAttendanceForm() {
       if (data.success) {
         setDocumentInput(""); // Limpiar para el siguiente o confirmación
       }
-    } catch (err) {
+    } catch {
       setResult({
         success: false,
         message: "Error de conexión al enviar el registro. Verifica tu internet.",
@@ -183,7 +181,10 @@ function StudentAttendanceForm() {
           </p>
         </div>
       ) : (
-        <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 flex items-start gap-3">
+        <div
+          role="alert"
+          className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 flex items-start gap-3"
+        >
           <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-amber-400" />
           <div className="text-xs leading-relaxed">
             <p className="font-semibold mb-0.5">Atención:</p>
@@ -207,6 +208,8 @@ function StudentAttendanceForm() {
               type="text"
               inputMode="numeric"
               pattern="[0-9]*"
+              autoComplete="off"
+              maxLength={30}
               autoFocus
               required
               value={documentInput}
@@ -240,6 +243,8 @@ function StudentAttendanceForm() {
       {/* Resultado de confirmación */}
       {result && (
         <div
+          role="status"
+          aria-live="polite"
           className={`mt-6 p-4 rounded-2xl border text-sm animate-in fade-in zoom-in-95 duration-200 ${
             result.success
               ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-200"

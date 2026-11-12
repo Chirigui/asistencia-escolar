@@ -38,7 +38,7 @@ export default function LoginPage() {
         router.push("/profesor");
         router.refresh();
       }
-    } catch (err: any) {
+    } catch {
       setErrorMsg("Ocurrió un error inesperado al iniciar sesión.");
     } finally {
       setLoading(false);
@@ -62,13 +62,15 @@ export default function LoginPage() {
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5">
+            <label htmlFor="login-email" className="block text-xs font-medium text-slate-300 mb-1.5">
               Correo Institucional
             </label>
             <div className="relative">
               <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
               <input
+                id="login-email"
                 type="email"
+                autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -79,13 +81,15 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5">
+            <label htmlFor="login-password" className="block text-xs font-medium text-slate-300 mb-1.5">
               Contraseña
             </label>
             <div className="relative">
               <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
               <input
+                id="login-password"
                 type="password"
+                autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -96,7 +100,11 @@ export default function LoginPage() {
           </div>
 
           {errorMsg && (
-            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs leading-relaxed">
+            <div
+              role="alert"
+              aria-live="polite"
+              className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs leading-relaxed"
+            >
               {errorMsg}
             </div>
           )}

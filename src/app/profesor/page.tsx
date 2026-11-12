@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -8,17 +8,18 @@ import {
   PlusCircle,
   QrCode,
   Users,
-  FileSpreadsheet,
   LogOut,
   X,
-  Search,
   CheckCircle,
-  Clock,
   Download,
   AlertCircle,
   RefreshCw,
-  ExternalLink,
 } from "lucide-react";
+import {
+  buildCsv,
+  isImportHeaderRow,
+  parseDelimited,
+} from "@/lib/csv";
 
 interface SessionListItem {
   id: string;
@@ -33,8 +34,39 @@ interface SessionListItem {
   total: number;
 }
 
+interface SessionDetailSession {
+  id: string;
+  code: string;
+  subject: string;
+  group_name: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+}
+
+interface PresentRow {
+  attendanceId: string;
+  registeredAt: string;
+  status: string;
+  method: string;
+  notes: string | null;
+  document: string;
+  fullName: string;
+  grade: string;
+  groupName: string;
+}
+
+interface AbsentRow {
+  id: string;
+  document: string;
+  fullName: string;
+  grade: string;
+  groupName: string;
+}
+
 interface SessionDetail {
-  session: any;
+  session: SessionDetailSession;
   sessionUrl: string;
   qrDataUrl: string;
   stats: {
@@ -42,8 +74,54 @@ interface SessionDetail {
     presentsCount: number;
     absentsCount: number;
   };
-  presents: any[];
-  absents: any[];
+  presents: PresentRow[];
+  absents: AbsentRow[];
+}
+
+interface ReportRow {
+  id: string;
+  sessionCode: string;
+  subject: string;
+  sessionGroup: string;
+  date: string;
+  registeredAt: string;
+  document: string;
+  studentName: string;
+  grade: string;
+  group: string;
+  status: string;
+  method: string;
+}
+
+interface ImportPreviewRow {
+  row: number;
+  document: string;
+  fullName: string;
+  grade: string;
+  groupName: string;
+  status: string;
+  valid: boolean;
+  errors: string[];
+}
+
+interface ImportPreview {
+  success: boolean;
+  dryRun: boolean;
+  summary: {
+    total: number;
+    valid: number;
+    duplicates: number;
+    invalid: number;
+    inserted: number;
+  };
+  preview: ImportPreviewRow[];
+  message?: string;
+}
+
+function todayInputValue(): string {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
 }
 
 export default function TeacherPanelPage() {
@@ -54,13 +132,14 @@ export default function TeacherPanelPage() {
   // Estados de sesiones
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
+  const [sessionsError, setSessionsError] = useState("");
 
   // Modal nueva clase
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState({
     subject: "",
     groupName: "10A",
-    date: new Date().toISOString().split("T")[0],
+    date: todayInputValue(),
     startTime: "07:00",
     endTime: "08:30",
   });
@@ -70,14 +149,18 @@ export default function TeacherPanelPage() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const [statusUpdating, setStatusUpdating] = useState(false);
   const [manualDocument, setManualDocument] = useState("");
   const [manualNote, setManualNote] = useState("");
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
 
   // Estados de reportes
-  const [reports, setReports] = useState<any[]>([]);
+  const [reports, setReports] = useState<ReportRow[]>([]);
   const [loadingReports, setLoadingReports] = useState(false);
+  const [reportsError, setReportsError] = useState("");
+  const [reportsTruncated, setReportsTruncated] = useState(false);
   const [reportFilters, setReportFilters] = useState({
     dateFrom: "",
     dateTo: "",
@@ -87,9 +170,35 @@ export default function TeacherPanelPage() {
 
   // Estados de importación masiva
   const [importCsvText, setImportCsvText] = useState("");
-  const [importPreview, setImportPreview] = useState<any | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
   const [importing, setImporting] = useState(false);
   const [importSuccessMsg, setImportSuccessMsg] = useState("");
+
+  const loadSessions = useCallback(async () => {
+    try {
+      setLoadingSessions(true);
+      setSessionsError("");
+
+      const res = await fetch("/api/sessions");
+      if (res.status === 401) {
+        router.push("/login");
+        return;
+      }
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setSessionsError(data.message || "No fue posible cargar las sesiones.");
+        return;
+      }
+
+      setSessions(data.sessions || []);
+    } catch (err) {
+      console.error(err);
+      setSessionsError("Error de conexión al cargar las sesiones.");
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, [router]);
 
   // Carga inicial y verificación de Auth
   useEffect(() => {
@@ -107,22 +216,7 @@ export default function TeacherPanelPage() {
     };
 
     checkAuthAndLoad();
-  }, [router]);
-
-  const loadSessions = async () => {
-    try {
-      setLoadingSessions(true);
-      const res = await fetch("/api/sessions");
-      const data = await res.json();
-      if (data.success) {
-        setSessions(data.sessions || []);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoadingSessions(false);
-    }
-  };
+  }, [router, loadSessions]);
 
   const handleLogout = async () => {
     const supabase = createClient();
@@ -147,7 +241,7 @@ export default function TeacherPanelPage() {
       } else {
         alert(data.message || "Error al crear la clase.");
       }
-    } catch (err) {
+    } catch {
       alert("Error de conexión al crear clase.");
     } finally {
       setCreating(false);
@@ -157,40 +251,70 @@ export default function TeacherPanelPage() {
   const openSessionDetail = async (id: string) => {
     setSelectedSessionId(id);
     setLoadingDetail(true);
+    setDetailError("");
+    setSessionDetail(null);
+
     try {
       const res = await fetch(`/api/sessions/${id}`);
-      const data = await res.json();
-      if (data.success) {
-        setSessionDetail(data);
+      if (res.status === 401) {
+        router.push("/login");
+        return;
       }
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setDetailError(data.message || "No fue posible cargar la sesión.");
+        return;
+      }
+
+      setSessionDetail(data);
     } catch (err) {
       console.error(err);
+      setDetailError("Error de conexión al cargar la sesión.");
     } finally {
       setLoadingDetail(false);
     }
   };
 
   const toggleSessionStatus = async (currentStatus: string) => {
-    if (!selectedSessionId) return;
+    if (!selectedSessionId || statusUpdating) return;
+
     const nextStatus = currentStatus === "ABIERTA" ? "CERRADA" : "ABIERTA";
+    if (
+      nextStatus === "CERRADA" &&
+      !window.confirm(
+        "¿Cerrar la toma de asistencia? Los estudiantes ya no podrán registrarse."
+      )
+    ) {
+      return;
+    }
+
+    setStatusUpdating(true);
     try {
       const res = await fetch(`/api/sessions/${selectedSessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
-      const data = await res.json();
-      if (data.success) {
-        openSessionDetail(selectedSessionId);
-        loadSessions();
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        alert(data.message || "No fue posible actualizar la sesión.");
+        return;
       }
+
+      await openSessionDetail(selectedSessionId);
+      await loadSessions();
     } catch (err) {
       console.error(err);
+      alert("Error de conexión al actualizar la sesión.");
+    } finally {
+      setStatusUpdating(false);
     }
   };
 
   const handleManualAttendance = async (documentToMark?: string) => {
-    const doc = documentToMark || manualDocument;
+    const doc = (documentToMark || manualDocument).trim();
     if (!doc || !selectedSessionId || manualSubmitting) return;
 
     setManualSubmitting(true);
@@ -204,16 +328,19 @@ export default function TeacherPanelPage() {
           notes: manualNote || "Marcado manual docente",
         }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setManualDocument("");
-        setManualNote("");
-        openSessionDetail(selectedSessionId);
-        loadSessions();
-      } else {
-        alert(data.message);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        alert(data.message || "No fue posible registrar la asistencia.");
+        return;
       }
+
+      setManualDocument("");
+      setManualNote("");
+      await openSessionDetail(selectedSessionId);
+      await loadSessions();
     } catch (err) {
+      console.error(err);
       alert("Error de conexión al registrar asistencia manual.");
     } finally {
       setManualSubmitting(false);
@@ -222,6 +349,9 @@ export default function TeacherPanelPage() {
 
   const loadReports = async () => {
     setLoadingReports(true);
+    setReportsError("");
+    setReportsTruncated(false);
+
     try {
       const params = new URLSearchParams();
       if (reportFilters.dateFrom) params.append("dateFrom", reportFilters.dateFrom);
@@ -230,12 +360,24 @@ export default function TeacherPanelPage() {
       if (reportFilters.subject) params.append("subject", reportFilters.subject);
 
       const res = await fetch(`/api/reports?${params.toString()}`);
-      const data = await res.json();
-      if (data.success) {
-        setReports(data.rows || []);
+      if (res.status === 401) {
+        router.push("/login");
+        return;
       }
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setReports([]);
+        setReportsError(data.message || "No fue posible generar el reporte.");
+        return;
+      }
+
+      setReports(data.rows || []);
+      setReportsTruncated(Boolean(data.truncated));
     } catch (err) {
       console.error(err);
+      setReports([]);
+      setReportsError("Error de conexión al generar el reporte.");
     } finally {
       setLoadingReports(false);
     }
@@ -243,27 +385,41 @@ export default function TeacherPanelPage() {
 
   const exportReportsCsv = () => {
     if (reports.length === 0) return;
-    const headers = ["Sesion", "Fecha", "Hora", "Documento", "Estudiante", "Grado", "Grupo", "Materia", "Metodo"];
+
+    const headers = [
+      "Sesion",
+      "Fecha",
+      "Hora",
+      "Documento",
+      "Estudiante",
+      "Grado",
+      "Grupo",
+      "Materia",
+      "Metodo",
+      "Estado",
+    ];
     const rows = reports.map((r) => [
       r.sessionCode,
       r.date,
-      new Date(r.registeredAt).toLocaleTimeString(),
+      new Date(r.registeredAt).toLocaleTimeString("es-CO", { hour12: false }),
       r.document,
-      `"${r.studentName}"`,
+      r.studentName,
       r.grade,
       r.group,
-      `"${r.subject}"`,
+      r.subject,
       r.method,
+      r.status,
     ]);
-    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const csvContent = buildCsv(headers, rows);
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `reporte_asistencia_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute("download", `reporte_asistencia_${todayInputValue()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handleParseAndImport = async (dryRun: boolean) => {
@@ -272,35 +428,56 @@ export default function TeacherPanelPage() {
     setImportSuccessMsg("");
 
     try {
-      // Parsear líneas CSV / TSV
-      const lines = importCsvText.trim().split(/\r?\n/);
-      const rows = lines.map((line) => {
-        const parts = line.includes("\t") ? line.split("\t") : line.split(",");
-        return {
+      // Parser con soporte para comillas y comas dentro de campos.
+      const parsed = parseDelimited(importCsvText);
+      const firstDataRow = parsed.length > 0 && isImportHeaderRow(parsed[0]) ? 1 : 0;
+      const rows = parsed
+        .slice(firstDataRow)
+        .map((parts) => ({
           document: (parts[0] || "").trim(),
           fullName: (parts[1] || "").trim(),
           grade: (parts[2] || "").trim(),
           groupName: (parts[3] || "").trim(),
           status: (parts[4] || "ACTIVO").trim(),
-        };
-      }).filter((r) => r.document && r.document.toLowerCase() !== "documento");
+        }))
+        .filter((row) => row.document);
+
+      if (rows.length === 0) {
+        alert("No se detectaron filas válidas para importar.");
+        return;
+      }
+
+      if (rows.length > 2000) {
+        alert("La importación admite como máximo 2000 filas por lote.");
+        return;
+      }
 
       const res = await fetch("/api/students/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rows, dryRun }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setImportPreview(data);
-        if (!dryRun) {
-          setImportSuccessMsg(`¡Éxito! Se importaron ${data.summary.inserted} estudiantes correctamente.`);
-          setImportCsvText("");
-        }
-      } else {
+
+      if (res.status === 401) {
+        router.push("/login");
+        return;
+      }
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
         alert(data.message || "Error en importación");
+        return;
+      }
+
+      setImportPreview(data);
+      if (!dryRun) {
+        setImportSuccessMsg(
+          `¡Éxito! Se importaron ${data.summary.inserted} estudiantes correctamente.`
+        );
+        setImportCsvText("");
       }
     } catch (err) {
+      console.error(err);
       alert("Error de conexión durante la importación.");
     } finally {
       setImporting(false);
@@ -378,6 +555,8 @@ export default function TeacherPanelPage() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={loadSessions}
+                  title="Actualizar sesiones"
+                  aria-label="Actualizar sesiones"
                   className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors text-slate-300"
                 >
                   <RefreshCw className="w-4 h-4" />
@@ -391,6 +570,16 @@ export default function TeacherPanelPage() {
                 </button>
               </div>
             </div>
+
+            {sessionsError && (
+              <div
+                role="alert"
+                className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-3"
+              >
+                <AlertCircle className="w-5 h-5 shrink-0" />
+                <span>{sessionsError}</span>
+              </div>
+            )}
 
             {loadingSessions ? (
               <div className="py-20 text-center text-slate-500 text-sm">
@@ -409,8 +598,17 @@ export default function TeacherPanelPage() {
                 {sessions.map((ses) => (
                   <div
                     key={ses.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Abrir sesión ${ses.code} de ${ses.subject}, grupo ${ses.groupName}`}
                     onClick={() => openSessionDetail(ses.id)}
-                    className="p-5 bg-slate-900 border border-slate-800 rounded-2xl hover:border-blue-500/50 hover:bg-slate-900/80 cursor-pointer transition-all flex flex-col justify-between group"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        openSessionDetail(ses.id);
+                      }
+                    }}
+                    className="p-5 bg-slate-900 border border-slate-800 rounded-2xl hover:border-blue-500/50 hover:bg-slate-900/80 focus:outline-none focus:ring-2 focus:ring-blue-500/60 cursor-pointer transition-all flex flex-col justify-between group"
                   >
                     <div>
                       <div className="flex items-center justify-between mb-2">
@@ -478,10 +676,13 @@ export default function TeacherPanelPage() {
             </div>
 
             {/* Filtros */}
-            <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+            <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl grid grid-cols-1 sm:grid-cols-5 gap-3 text-xs">
               <div>
-                <label className="block text-slate-400 mb-1">Fecha Desde</label>
+                <label htmlFor="report-date-from" className="block text-slate-400 mb-1">
+                  Fecha Desde
+                </label>
                 <input
+                  id="report-date-from"
                   type="date"
                   value={reportFilters.dateFrom}
                   onChange={(e) => setReportFilters({ ...reportFilters, dateFrom: e.target.value })}
@@ -489,8 +690,11 @@ export default function TeacherPanelPage() {
                 />
               </div>
               <div>
-                <label className="block text-slate-400 mb-1">Fecha Hasta</label>
+                <label htmlFor="report-date-to" className="block text-slate-400 mb-1">
+                  Fecha Hasta
+                </label>
                 <input
+                  id="report-date-to"
                   type="date"
                   value={reportFilters.dateTo}
                   onChange={(e) => setReportFilters({ ...reportFilters, dateTo: e.target.value })}
@@ -498,24 +702,63 @@ export default function TeacherPanelPage() {
                 />
               </div>
               <div>
-                <label className="block text-slate-400 mb-1">Grupo</label>
+                <label htmlFor="report-group" className="block text-slate-400 mb-1">
+                  Grupo
+                </label>
                 <input
+                  id="report-group"
                   type="text"
+                  maxLength={20}
                   placeholder="Ej: 10A"
                   value={reportFilters.groupName}
                   onChange={(e) => setReportFilters({ ...reportFilters, groupName: e.target.value })}
                   className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-white"
                 />
               </div>
+              <div>
+                <label htmlFor="report-subject" className="block text-slate-400 mb-1">
+                  Materia
+                </label>
+                <input
+                  id="report-subject"
+                  type="text"
+                  maxLength={120}
+                  placeholder="Ej: Matemáticas"
+                  value={reportFilters.subject}
+                  onChange={(e) => setReportFilters({ ...reportFilters, subject: e.target.value })}
+                  className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-white"
+                />
+              </div>
               <div className="flex items-end">
                 <button
                   onClick={loadReports}
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold text-white transition-colors"
+                  disabled={loadingReports}
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 rounded-lg font-semibold text-white transition-colors"
                 >
-                  Aplicar Filtros
+                  {loadingReports ? "Consultando..." : "Aplicar Filtros"}
                 </button>
               </div>
             </div>
+
+            {reportsError && (
+              <div
+                role="alert"
+                className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-3"
+              >
+                <AlertCircle className="w-5 h-5 shrink-0" />
+                <span>{reportsError}</span>
+              </div>
+            )}
+
+            {reportsTruncated && (
+              <div
+                role="status"
+                className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs"
+              >
+                El reporte supera las 10.000 filas y fue truncado. Ajusta el rango de
+                fechas o los filtros para exportar el resto.
+              </div>
+            )}
 
             {/* Tabla de registros */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
@@ -596,6 +839,9 @@ export default function TeacherPanelPage() {
             <div className="space-y-3">
               <textarea
                 rows={7}
+                maxLength={500_000}
+                spellCheck={false}
+                aria-label="Filas de estudiantes para importar"
                 value={importCsvText}
                 onChange={(e) => setImportCsvText(e.target.value)}
                 placeholder={"1000000020,Estudiante Ejemplo Uno,10,10A,ACTIVO\n1000000021,Estudiante Ejemplo Dos,10,10A,ACTIVO"}
@@ -653,7 +899,7 @@ export default function TeacherPanelPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
-                      {importPreview.preview.map((p: any) => (
+                      {importPreview.preview.map((p) => (
                         <tr key={p.row}>
                           <td className="p-2 font-mono text-slate-500">{p.row}</td>
                           <td className="p-2 font-mono">{p.document}</td>
@@ -679,23 +925,35 @@ export default function TeacherPanelPage() {
 
       {/* MODAL: NUEVA CLASE */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="create-session-title"
+        >
           <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative">
             <button
               onClick={() => setShowCreateModal(false)}
+              aria-label="Cerrar creación de clase"
               className="absolute right-4 top-4 text-slate-400 hover:text-white"
             >
               <X className="w-5 h-5" />
             </button>
-            <h3 className="text-lg font-bold mb-1">Crear Nueva Clase</h3>
+            <h3 id="create-session-title" className="text-lg font-bold mb-1">
+              Crear Nueva Clase
+            </h3>
             <p className="text-xs text-slate-400 mb-5">Define la asignatura y el grupo para generar el código QR.</p>
 
             <form onSubmit={handleCreateSession} className="space-y-4 text-xs">
               <div>
-                <label className="block text-slate-300 mb-1">Materia / Asignatura</label>
+                <label htmlFor="create-subject" className="block text-slate-300 mb-1">
+                  Materia / Asignatura
+                </label>
                 <input
+                  id="create-subject"
                   type="text"
                   required
+                  maxLength={120}
                   placeholder="Ej: Matemáticas Avanzadas"
                   value={createForm.subject}
                   onChange={(e) => setCreateForm({ ...createForm, subject: e.target.value })}
@@ -705,10 +963,14 @@ export default function TeacherPanelPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 mb-1">Grupo</label>
+                  <label htmlFor="create-group" className="block text-slate-300 mb-1">
+                    Grupo
+                  </label>
                   <input
+                    id="create-group"
                     type="text"
                     required
+                    maxLength={20}
                     placeholder="Ej: 10A"
                     value={createForm.groupName}
                     onChange={(e) => setCreateForm({ ...createForm, groupName: e.target.value })}
@@ -716,8 +978,11 @@ export default function TeacherPanelPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 mb-1">Fecha</label>
+                  <label htmlFor="create-date" className="block text-slate-300 mb-1">
+                    Fecha
+                  </label>
                   <input
+                    id="create-date"
                     type="date"
                     required
                     value={createForm.date}
@@ -729,8 +994,11 @@ export default function TeacherPanelPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 mb-1">Hora Inicio</label>
+                  <label htmlFor="create-start-time" className="block text-slate-300 mb-1">
+                    Hora Inicio
+                  </label>
                   <input
+                    id="create-start-time"
                     type="time"
                     required
                     value={createForm.startTime}
@@ -739,8 +1007,11 @@ export default function TeacherPanelPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 mb-1">Hora Fin</label>
+                  <label htmlFor="create-end-time" className="block text-slate-300 mb-1">
+                    Hora Fin
+                  </label>
                   <input
+                    id="create-end-time"
                     type="time"
                     required
                     value={createForm.endTime}
@@ -764,17 +1035,37 @@ export default function TeacherPanelPage() {
 
       {/* MODAL: DETALLE DE SESIÓN / PROYECTOR QR */}
       {selectedSessionId && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="session-detail-title"
+        >
           <div className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative my-auto">
             <button
               onClick={() => setSelectedSessionId(null)}
+              aria-label="Cerrar detalle de sesión"
               className="absolute right-4 top-4 text-slate-400 hover:text-white p-1"
             >
               <X className="w-6 h-6" />
             </button>
 
-            {loadingDetail || !sessionDetail ? (
-              <div className="py-24 text-center text-slate-400 text-sm">Cargando detalles de la clase...</div>
+            {loadingDetail ? (
+              <div className="py-24 text-center text-slate-400 text-sm">
+                Cargando detalles de la clase...
+              </div>
+            ) : detailError ? (
+              <div
+                role="alert"
+                className="my-12 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-start gap-3"
+              >
+                <AlertCircle className="w-5 h-5 shrink-0" />
+                <span>{detailError}</span>
+              </div>
+            ) : !sessionDetail ? (
+              <div className="py-24 text-center text-slate-400 text-sm">
+                No hay información disponible.
+              </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Lado Izquierdo: QR Gigante para proyector */}
@@ -785,17 +1076,25 @@ export default function TeacherPanelPage() {
                     </span>
                     <button
                       onClick={() => toggleSessionStatus(sessionDetail.session.status)}
-                      className={`text-xs font-bold px-3 py-0.5 rounded-full border transition-colors ${
+                      disabled={statusUpdating}
+                      aria-busy={statusUpdating}
+                      className={`text-xs font-bold px-3 py-0.5 rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                         sessionDetail.session.status === "ABIERTA"
                           ? "bg-rose-500/20 border-rose-500/30 text-rose-300 hover:bg-rose-500/30"
                           : "bg-emerald-500/20 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30"
                       }`}
                     >
-                      {sessionDetail.session.status === "ABIERTA" ? "Cerrar Asistencia" : "Reabrir Asistencia"}
+                      {statusUpdating
+                        ? "Actualizando..."
+                        : sessionDetail.session.status === "ABIERTA"
+                          ? "Cerrar Asistencia"
+                          : "Reabrir Asistencia"}
                     </button>
                   </div>
 
-                  <h3 className="text-xl font-bold text-white mb-1">{sessionDetail.session.subject}</h3>
+                  <h3 id="session-detail-title" className="text-xl font-bold text-white mb-1">
+                    {sessionDetail.session.subject}
+                  </h3>
                   <p className="text-xs text-slate-400 mb-4">
                     Grupo <strong>{sessionDetail.session.group_name}</strong> · {sessionDetail.session.date}
                   </p>
@@ -839,26 +1138,36 @@ export default function TeacherPanelPage() {
                       <div className="flex gap-2">
                         <input
                           type="text"
+                          maxLength={40}
+                          aria-label="Documento del estudiante para marcado manual"
                           placeholder="Documento del alumno"
                           value={manualDocument}
                           onChange={(e) => setManualDocument(e.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              handleManualAttendance();
+                            }
+                          }}
                           className="flex-1 p-2 bg-slate-900 border border-slate-800 rounded-lg text-white"
                         />
                         <button
                           onClick={() => handleManualAttendance()}
-                          disabled={manualSubmitting || !manualDocument}
+                          disabled={manualSubmitting || !manualDocument.trim()}
                           className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg font-semibold"
                         >
-                          Marcar
+                          {manualSubmitting ? "Marcando..." : "Marcar"}
                         </button>
                       </div>
                     </div>
 
                     {/* Lista de Presentes y Ausentes */}
                     <div className="text-xs mb-2 flex items-center justify-between">
-                      <span className="font-bold text-slate-300">Lista en Tiempo Real</span>
+                      <span className="font-bold text-slate-300">Lista de la sesión</span>
                       <input
                         type="text"
+                        maxLength={80}
+                        aria-label="Filtrar estudiantes por nombre"
                         placeholder="Filtrar por nombre..."
                         value={searchFilter}
                         onChange={(e) => setSearchFilter(e.target.value.toLowerCase())}

@@ -1,92 +1,182 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { normalizeDocument } from "@/lib/utils";
+import { requireAdmin } from "@/lib/auth";
+import { normalizeDocument, normalizeGroupText } from "@/lib/utils";
+import { cleanString, readJsonObject } from "@/lib/validation";
+
+const MAX_IMPORT_ROWS = 2_000;
+const EXISTING_LOOKUP_CHUNK = 500;
+const STUDENT_STATUSES = ["ACTIVO", "INACTIVO", "RETIRADO"] as const;
 
 interface StudentImportRow {
+  document?: unknown;
+  fullName?: unknown;
+  grade?: unknown;
+  groupName?: unknown;
+  status?: unknown;
+}
+
+interface ValidatedImportRow {
+  row: number;
   document: string;
   fullName: string;
   grade: string;
   groupName: string;
-  status?: string;
+  status: string;
+  valid: boolean;
+  errors: string[];
+}
+
+interface StudentInsertRow {
+  document: string;
+  document_normalized: string;
+  full_name: string;
+  grade: string;
+  group_name: string;
+  status: string;
 }
 
 export async function POST(request: Request) {
+  // La política SQL permite modificar students sólo a administradores.
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+
+  const body = await readJsonObject(request);
+  if (!body) {
+    return NextResponse.json(
+      { success: false, message: "Cuerpo de solicitud inválido." },
+      { status: 400 }
+    );
+  }
+
+  const { rows, dryRun = false } = body;
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return NextResponse.json(
+      { success: false, message: "No se proporcionaron filas para procesar." },
+      { status: 400 }
+    );
+  }
+
+  if (rows.length > MAX_IMPORT_ROWS) {
+    return NextResponse.json(
+      {
+        success: false,
+        message: `La importación admite como máximo ${MAX_IMPORT_ROWS} filas por lote.`,
+      },
+      { status: 413 }
+    );
+  }
+
   try {
-    const supabase = createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const { supabase } = auth.ctx;
 
-    if (authError || !user) {
-      return NextResponse.json({ success: false, message: "No autorizado." }, { status: 401 });
-    }
+    // Consulta sólo los documentos entrantes, en bloques, en vez de descargar
+    // todo el padrón en cada importación.
+    const incomingDocs = new Set<string>();
+    rows.forEach((row) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return;
+      const docNorm = normalizeDocument(
+        cleanString((row as StudentImportRow).document, 40)
+      );
+      if (docNorm) incomingDocs.add(docNorm);
+    });
 
-    const body = await request.json();
-    const { rows, dryRun = false } = body;
+    const existingDocs = new Set<string>();
+    // Se consultan variantes en mayúsculas/minúsculas para no duplicar datos
+    // históricos que se hayan guardado con otra capitalización.
+    const docs = Array.from(
+      new Set(
+        Array.from(incomingDocs).flatMap((doc) => [
+          doc,
+          doc.toLowerCase(),
+        ])
+      )
+    );
 
-    if (!Array.isArray(rows) || rows.length === 0) {
-      return NextResponse.json(
-        { success: false, message: "No se proporcionaron filas para procesar." },
-        { status: 400 }
+    for (let i = 0; i < docs.length; i += EXISTING_LOOKUP_CHUNK) {
+      const chunk = docs.slice(i, i + EXISTING_LOOKUP_CHUNK);
+      const { data, error } = await supabase
+        .from("students")
+        .select("document_normalized")
+        .in("document_normalized", chunk);
+
+      if (error) {
+        console.error("Error consultando documentos existentes:", error);
+        return NextResponse.json(
+          { success: false, message: "No fue posible validar la matrícula existente." },
+          { status: 500 }
+        );
+      }
+
+      (data || []).forEach((student: { document_normalized: string }) =>
+        existingDocs.add(normalizeDocument(student.document_normalized))
       );
     }
 
-    const adminDb = createAdminClient();
-
-    // 1. Obtener documentos ya registrados en la base de datos
-    const { data: existingStudents } = await adminDb
-      .from("students")
-      .select("document_normalized");
-
-    const existingDocs = new Set(existingStudents?.map((s) => s.document_normalized) || []);
     const fileDocs = new Set<string>();
 
     let validCount = 0;
     let duplicateCount = 0;
     let invalidCount = 0;
 
-    const validatedRows: any[] = [];
-    const validStudentsToInsert: any[] = [];
+    const validatedRows: ValidatedImportRow[] = [];
+    const validStudentsToInsert: StudentInsertRow[] = [];
 
-    rows.forEach((row: StudentImportRow, index: number) => {
-      const docRaw = String(row.document || "").trim();
+    rows.forEach((rawRow, index) => {
+      const row =
+        rawRow && typeof rawRow === "object" && !Array.isArray(rawRow)
+          ? (rawRow as StudentImportRow)
+          : {};
+
+      const docRaw = cleanString(row.document, 40);
       const docNorm = normalizeDocument(docRaw);
-      const name = String(row.fullName || "").trim();
-      const grade = String(row.grade || "").trim().toUpperCase();
-      const group = String(row.groupName || "").trim().toUpperCase();
-      const status = (String(row.status || "ACTIVO").trim().toUpperCase() as any) || "ACTIVO";
+      const name = cleanString(row.fullName, 120);
+      const grade = cleanString(row.grade, 20).toUpperCase();
+      const group = normalizeGroupText(cleanString(row.groupName, 20));
+      const status = cleanString(row.status, 20).toUpperCase() || "ACTIVO";
 
       const errors: string[] = [];
 
       if (!docNorm) errors.push("Documento vacío");
-      else if (docNorm.length < 5) errors.push("Documento demasiado corto (mín. 5 dígitos)");
+      else if (docNorm.length < 5 || docNorm.length > 30) {
+        errors.push("Documento inválido (entre 5 y 30 caracteres)");
+      }
 
       if (!name) errors.push("Nombre vacío");
       if (!grade) errors.push("Grado vacío");
       if (!group) errors.push("Grupo vacío");
 
-      if (docNorm && fileDocs.has(docNorm)) errors.push("Duplicado en el mismo archivo");
-      if (docNorm && existingDocs.has(docNorm)) errors.push("Ya existe en el sistema escolar");
+      if (!STUDENT_STATUSES.includes(status as (typeof STUDENT_STATUSES)[number])) {
+        errors.push("Estado inválido (usa ACTIVO, INACTIVO o RETIRADO)");
+      }
+
+      if (docNorm && fileDocs.has(docNorm)) {
+        errors.push("Duplicado en el mismo archivo");
+      }
+      if (docNorm && existingDocs.has(docNorm)) {
+        errors.push("Ya existe en el sistema escolar");
+      }
 
       if (docNorm) fileDocs.add(docNorm);
 
       const isValid = errors.length === 0;
 
       if (isValid) {
-        validCount++;
+        validCount += 1;
         validStudentsToInsert.push({
           document: docRaw,
           document_normalized: docNorm,
           full_name: name,
           grade,
           group_name: group,
-          status: ["ACTIVO", "INACTIVO", "RETIRADO"].includes(status) ? status : "ACTIVO",
+          status,
         });
+      } else if (
+        errors.some((error) => error.includes("existe") || error.includes("Duplicado"))
+      ) {
+        duplicateCount += 1;
       } else {
-        if (errors.some((e) => e.includes("existe") || e.includes("Duplicado"))) {
-          duplicateCount++;
-        } else {
-          invalidCount++;
-        }
+        invalidCount += 1;
       }
 
       validatedRows.push({
@@ -101,15 +191,26 @@ export async function POST(request: Request) {
       });
     });
 
-    // 2. Si no es dryRun (previsualización), insertar las filas válidas
-    if (!dryRun && validStudentsToInsert.length > 0) {
-      const { error: insertError } = await adminDb
+    if (dryRun !== true && validStudentsToInsert.length > 0) {
+      const { error: insertError } = await supabase
         .from("students")
         .insert(validStudentsToInsert);
 
       if (insertError) {
+        if (insertError.code === "23505") {
+          return NextResponse.json(
+            {
+              success: false,
+              message:
+                "La matrícula cambió mientras se validaba (documento duplicado). Vuelve a previsualizar.",
+            },
+            { status: 409 }
+          );
+        }
+
+        console.error("Error guardando estudiantes:", insertError);
         return NextResponse.json(
-          { success: false, message: "Error al guardar estudiantes: " + insertError.message },
+          { success: false, message: "No fue posible guardar los estudiantes." },
           { status: 500 }
         );
       }
@@ -117,17 +218,21 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      dryRun,
+      dryRun: dryRun === true,
       summary: {
         total: rows.length,
         valid: validCount,
         duplicates: duplicateCount,
         invalid: invalidCount,
-        inserted: dryRun ? 0 : validStudentsToInsert.length,
+        inserted: dryRun === true ? 0 : validStudentsToInsert.length,
       },
-      preview: validatedRows.slice(0, 50), // Primeras 50 para vista previa rápida
+      preview: validatedRows.slice(0, 50),
     });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, message: err.message }, { status: 500 });
+  } catch (error) {
+    console.error("Error inesperado en /api/students/import:", error);
+    return NextResponse.json(
+      { success: false, message: "Error interno del servidor." },
+      { status: 500 }
+    );
   }
 }

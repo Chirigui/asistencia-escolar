@@ -9,9 +9,9 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 - **Frontend & Backend:** [Next.js](https://nextjs.org/) (App Router, Server Components y Route Handlers en TypeScript).
 - **Estilos & UI:** [Tailwind CSS](https://tailwindcss.com/) y componentes responsivos optimizados para teléfonos inteligentes y pantallas de proyector.
 - **Base de Datos:** [Supabase PostgreSQL](https://supabase.com/) con **Row Level Security (RLS)** y transacciones atómicas con funciones `plpgsql`.
-- **Autenticación:** Supabase Auth (correo y contraseña institucional para profesores y directivos) con protección por Middleware y cookies seguras HTTP-only.
-- **Generación de QR:** Generación local de alta resolución mediante la librería nativa `qrcode` en Base64 (sin dependencias ni llamadas a servicios externos).
-- **Despliegue:** [Vercel](https://vercel.com/) (Edge Ready).
+- **Autenticación:** Supabase Auth (correo y contraseña institucional para profesores y directivos) con protección por Proxy, validación de rol en cada endpoint y cookies de sesión gestionadas por `@supabase/ssr`.
+- **Generación de QR:** Generación local de alta resolución mediante la librería nativa `qrcode` en Base64 (sin dependencias ni llamadas a servicios externos). Los Route Handlers que generan QR usan el runtime Node.js de Next.js.
+- **Despliegue:** [Vercel](https://vercel.com/). En Next.js 16 el Proxy y las rutas con `qrcode`/`service_role` corren en Node.js.
 
 ---
 
@@ -20,14 +20,21 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 ```text
 ├── .env.example                     # Plantilla de variables de entorno seguras
 ├── .gitignore                       # Exclusiones de control de versiones
+├── eslint.config.mjs                # Configuración ESLint 9 (flat config)
 ├── package.json                     # Scripts y dependencias
 ├── tsconfig.json                    # Configuración TypeScript con alias @/*
 ├── tailwind.config.js               # Configuración de estilos Tailwind
+├── scripts/
+│   └── verify-rls.mjs               # Verificación de aislamiento RLS contra Supabase
 ├── supabase/
 │   ├── schema.sql                   # DDL, tablas, RLS, índices y RPC anti-concurrencia
+│   ├── migrations/
+│   │   └── 20261112_security_hardening.sql
 │   └── seed.sql                     # Datos iniciales de prueba (estudiantes y clases)
 ├── test/
-│   └── business_logic.test.ts       # Pruebas automatizadas unitarias
+│   ├── business_logic.test.ts       # Normalización, CSV e importación
+│   ├── session_code.test.ts         # Códigos de sesión aleatorios
+│   └── validation.test.ts           # UUIDs, fechas, horas, JSON e IPs
 └── src/
     ├── app/
     │   ├── api/                     # Endpoints de API REST / Route Handlers
@@ -44,13 +51,18 @@ Plataforma de software completa, moderna y segura para el control y registro de 
     │   ├── layout.tsx               # Root layout institucional
     │   └── page.tsx                 # Redirección automática inicial
     ├── lib/
+    │   ├── auth.ts                  # Validación de sesión y rol en Route Handlers
+    │   ├── csv.ts                   # Parser CSV/TSV y escape seguro para Excel
     │   ├── qr.ts                    # Generador nativo de código QR en Data URL
+    │   ├── rate-limit.ts            # Rate limit best-effort por instancia
+    │   ├── session-code.ts          # Códigos de sesión aleatorios
     │   ├── utils.ts                 # Normalización de documentos y texto
+    │   ├── validation.ts            # Validación de UUIDs, fechas, horas y JSON
     │   └── supabase/
     │       ├── admin.ts             # Cliente con service_role (sólo backend)
     │       ├── client.ts            # Cliente para componentes cliente (browser)
     │       └── server.ts            # Cliente con manejo de cookies para Server Components
-    ├── middleware.ts                # Protección perimetral de rutas con Supabase Auth
+    ├── proxy.ts                     # Protección perimetral de rutas con Supabase Auth
     └── types/
         └── database.ts              # Modelos e interfaces TypeScript
 ```
@@ -65,6 +77,11 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 3. Copia y ejecuta todo el contenido de [`supabase/schema.sql`](./supabase/schema.sql). Esto creará las tablas, índices, restricciones únicas de concurrencia y las políticas de seguridad (RLS).
 4. Opcionalmente, ejecuta [`supabase/seed.sql`](./supabase/seed.sql) para cargar estudiantes de prueba de los grados 10 y 11.
 5. En **Authentication > Users**, haz clic en **Add user** -> **Create user** para crear el usuario docente inicial (ejemplo: `profesor@colegio.edu.co` con su contraseña).
+   - **Importante:** desactiva el registro público en **Authentication > Providers > Email** (o en la configuración de signups). La aplicación está pensada para que sólo un administrador cree cuentas.
+   - El trigger crea el perfil con rol `teacher`. Para un administrador, actualiza el rol manualmente:
+     ```sql
+     UPDATE public.profiles SET role = 'admin' WHERE email = 'admin@colegio.edu.co';
+     ```
 6. Ve a **Project Settings > API** y copia:
    - `Project URL`
    - `anon public key`
@@ -83,10 +100,12 @@ Plataforma de software completa, moderna y segura para el control y registro de 
    SUPABASE_SERVICE_ROLE_KEY=tu_clave_service_role_secreta
    NEXT_PUBLIC_APP_URL=http://localhost:3000
    ```
-4. Instala las dependencias y corre las pruebas:
+4. Instala las dependencias y ejecuta las verificaciones:
    ```bash
    npm install
    npm test
+   npm run lint
+   npm run build
    ```
 5. Inicia el servidor de desarrollo:
    ```bash
@@ -110,23 +129,38 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 
 ---
 
-## 5. Manual de Uso del Producto
+## 5. Seguridad y migraciones
+
+- `SUPABASE_SERVICE_ROLE_KEY` sólo se usa en Route Handlers del servidor. Nunca debe tener prefijo `NEXT_PUBLIC_` ni llegar al navegador.
+- La API valida sesión **y rol** (`profiles.role`) y usa el cliente con la sesión del usuario para que RLS aplique. Un docente sólo ve sus sesiones y los estudiantes de los grupos que enseña; un administrador ve todo. La importación de matrícula requiere rol `admin`.
+- El registro QR valida estado, fecha, ventana horaria, grupo, estudiante activo y duplicados dentro de una función transaccional. La función RPC sólo es ejecutable por `service_role`.
+- Los endpoints públicos tienen un rate limit en memoria por instancia. En Vercel esto **no es un límite distribuido**; para producción se recomienda añadir Vercel WAF o Upstash Ratelimit.
+- La zona horaria de la ventana de registro está fijada en `America/Bogota` dentro de `schema.sql`. Si el colegio opera en otra zona, cámbiala en la función `register_student_attendance`.
+- **Migración en un proyecto existente:** haz copia de seguridad y ejecuta [`supabase/migrations/20261112_security_hardening.sql`](./supabase/migrations/20261112_security_hardening.sql) en el SQL Editor. En un proyecto nuevo basta con `schema.sql`. No ejecutes migraciones contra una base remota sin autorización.
+- **Cabeceras y CSP:** `next.config.js` aplica `Content-Security-Policy`, `X-Frame-Options: DENY`, `nosniff`, HSTS, `Referrer-Policy` y `Permissions-Policy`. La CSP permite `'unsafe-inline'` para los scripts de arranque de Next.js; una política estricta con nonce requeriría render dinámico en todas las páginas. Si usas un dominio propio de Supabase, agrégalo a `connect-src`.
+- **Verificación de RLS:** `npm run verify:rls` comprueba contra un proyecto real que `anon` no lee sesiones/incidencias, que dos docentes no ven sesiones ajenas, que un docente no ejecuta el RPC y que un admin ve todo. Requiere las variables `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `RLS_TEACHER_A_EMAIL/PASSWORD`, `RLS_TEACHER_B_EMAIL/PASSWORD` y `RLS_ADMIN_EMAIL/PASSWORD`. Sólo ejecuta lecturas.
+- **Versiones:** Next.js 16, React 19, ESLint 9 (flat config) y Node.js `>=22.6.0`. `npm run lint` usa `eslint .` porque `next lint` fue eliminado en Next.js 16.
+- **Archivos legacy:** se eliminaron `Codigo.js`, `Index.html` y `PanelProfesor.html` de la versión Google Apps Script, que contenían una contraseña por defecto antigua. Si esa contraseña se usó alguna vez en producción, rótala.
+
+---
+
+## 6. Manual de Uso del Producto
 
 ### A. Para el Estudiante (Teléfono Móvil)
 1. El estudiante escanea con la cámara de su celular el código QR proyectado en el salón de clases.
-2. El enlace abre automáticamente la pantalla `/asistencia?sesion=S001`. No necesita seleccionar materia ni introducir código manualmente.
+2. El enlace abre automáticamente la pantalla `/asistencia?sesion=SK7M2Q`. No necesita seleccionar materia ni introducir código manualmente.
 3. El estudiante digita su número de documento o tarjeta de identidad y pulsa **Registrar Asistencia**.
-4. Recibe confirmación en pantalla en milisegundos con su nombre, grupo y hora exacta de registro.
-5. **Protección:** Si intenta registrarse dos veces o si la clase ya fue cerrada, el sistema le muestra el motivo y bloquea la operación.
+4. Recibe confirmación en pantalla con su nombre, grupo y hora de registro.
+5. **Protección:** Si intenta registrarse dos veces, si la clase ya fue cerrada, si está fuera de la ventana horaria (15 minutos antes/después) o si el documento no pertenece al grupo de la sesión, el sistema bloquea la operación. Los códigos de sesión son aleatorios, no consecutivos.
 
 ### B. Para el Profesor (Computador / Proyector)
 1. Ingresa a `/login` con sus credenciales institucionales.
 2. En la pestaña **Clases y QR**, pulsa **Nueva Clase** e indica la materia, grupo y horario.
 3. Al hacer clic en la sesión, se abre el **Modo Proyector**:
    - Muestra el **código QR gigante** de alta nitidez para que los estudiantes lo escaneen desde sus asientos.
-   - Panel lateral con conteo en vivo de **Presentes** y **Ausentes**.
-   - Permite marcar **Presente manual** con un solo clic para alumnos que no tengan celular o tengan dificultades.
-   - Botón para **Cerrar Asistencia** en cualquier momento, impidiendo registros tardíos.
+   - Panel lateral con conteo de **Presentes** y **Ausentes**; se actualiza con el botón de refresco (no usa websockets).
+   - Permite marcar **Presente manual** para alumnos que no tengan celular o tengan dificultades.
+   - Botón para **Cerrar Asistencia** con confirmación, impidiendo registros QR y manuales tardíos hasta reabrir la sesión.
 
 ### C. Para la Administración Escolar
 1. **Reportes:** En la pestaña **Reportes**, filtra las asistencias por rango de fechas, grupo o materia y pulsa **Exportar CSV** para descargar hojas de cálculo listas para Excel.
@@ -134,7 +168,7 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 
 ---
 
-## 6. Mejoras Implementadas, Límites y Análisis de Costos
+## 7. Mejoras Implementadas, Límites y Análisis de Costos
 
 ### Mejoras frente a la versión de Google Apps Script:
 - **Latencia y Concurrencia:** Eliminado el cuello de botella de Google Sheets (límites de 30 solicitudes concurrentes y demoras de 3-8 segundos en Apps Script). Supabase PostgreSQL responde transacciones en < 50 ms.

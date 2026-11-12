@@ -1,23 +1,47 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { requireStaff } from "@/lib/auth";
 import { generateQrDataUrl } from "@/lib/qr";
+import { generateSessionCode } from "@/lib/session-code";
+import { normalizeGroupText } from "@/lib/utils";
+import {
+  cleanString,
+  getAppBaseUrl,
+  isValidDateString,
+  normalizeTimeString,
+  readJsonObject,
+} from "@/lib/validation";
+
+interface SessionRecord {
+  id: string;
+  code: string;
+  subject: string;
+  group_name: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+  created_at: string;
+  attendances?: Array<{ count: number }> | null;
+}
+
+interface NewSessionRecord extends SessionRecord {
+  teacher_id: string | null;
+  updated_at: string;
+}
 
 export async function GET() {
+  const auth = await requireStaff();
+  if (!auth.ok) return auth.response;
+
   try {
-    const supabase = createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    // Cliente con la sesión del usuario: RLS limita docentes a sus propias
+    // sesiones y permite a los administradores ver todas.
+    const { supabase } = auth.ctx;
 
-    if (authError || !user) {
-      return NextResponse.json({ success: false, message: "No autorizado." }, { status: 401 });
-    }
-
-    const adminDb = createAdminClient();
-
-    // Obtener sesiones con conteo de presentes
-    const { data: sessions, error } = await adminDb
+    const { data: sessions, error } = await supabase
       .from("sessions")
-      .select(`
+      .select(
+        `
         id,
         code,
         subject,
@@ -28,112 +52,142 @@ export async function GET() {
         status,
         created_at,
         attendances (count)
-      `)
+      `
+      )
       .order("created_at", { ascending: false });
 
     if (error) {
-      return NextResponse.json({ success: false, message: error.message }, { status: 500 });
-    }
-
-    // Obtener número de estudiantes activos por grupo
-    const { data: students } = await adminDb
-      .from("students")
-      .select("group_name")
-      .eq("status", "ACTIVO");
-
-    const countByGroup: Record<string, number> = {};
-    students?.forEach((st) => {
-      const g = (st.group_name || "").trim().toUpperCase();
-      countByGroup[g] = (countByGroup[g] || 0) + 1;
-    });
-
-    const formattedSessions = (sessions || []).map((s: any) => {
-      const grp = (s.group_name || "").trim().toUpperCase();
-      const presentsCount = s.attendances?.[0]?.count || 0;
-      const totalGroup = countByGroup[grp] || 0;
-
-      return {
-        id: s.id,
-        code: s.code,
-        subject: s.subject,
-        groupName: s.group_name,
-        date: s.date,
-        startTime: s.start_time,
-        endTime: s.end_time,
-        status: s.status,
-        presents: presentsCount,
-        total: totalGroup,
-      };
-    });
-
-    return NextResponse.json({ success: true, sessions: formattedSessions });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, message: err.message }, { status: 500 });
-  }
-}
-
-export async function POST(request: Request) {
-  try {
-    const supabase = createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ success: false, message: "No autorizado." }, { status: 401 });
-    }
-
-    const body = await request.json();
-    const { subject, groupName, date, startTime, endTime } = body;
-
-    if (!subject || !groupName || !date || !startTime || !endTime) {
+      console.error("Error listando sesiones:", error);
       return NextResponse.json(
-        { success: false, message: "Todos los campos de la sesión son obligatorios." },
-        { status: 400 }
-      );
-    }
-
-    const adminDb = createAdminClient();
-
-    // Generar nuevo código consecutivo: S001, S002, etc.
-    const { data: latestSession } = await adminDb
-      .from("sessions")
-      .select("code")
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    let nextCode = "S001";
-    if (latestSession && latestSession.length > 0) {
-      const lastCode = latestSession[0].code;
-      const match = lastCode.match(/^S(\d+)$/);
-      if (match) {
-        const num = parseInt(match[1], 10) + 1;
-        nextCode = "S" + String(num).padStart(3, "0");
-      }
-    }
-
-    const { data: newSession, error: insertError } = await adminDb
-      .from("sessions")
-      .insert({
-        code: nextCode,
-        teacher_id: user.id,
-        subject: subject.trim(),
-        group_name: groupName.trim(),
-        date,
-        start_time: startTime,
-        end_time: endTime,
-        status: "ABIERTA",
-      })
-      .select()
-      .single();
-
-    if (insertError || !newSession) {
-      return NextResponse.json(
-        { success: false, message: "Error al crear la sesión: " + insertError?.message },
+        { success: false, message: "No fue posible cargar las sesiones." },
         { status: 500 }
       );
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const sessionUrl = `${baseUrl}/asistencia?sesion=${newSession.code}`;
+    const { data: students, error: studentsError } = await supabase
+      .from("students")
+      .select("group_name")
+      .eq("status", "ACTIVO");
+
+    if (studentsError) {
+      console.error("Error contando estudiantes por grupo:", studentsError);
+    }
+
+    const countByGroup: Record<string, number> = {};
+    students?.forEach((student: { group_name: string | null }) => {
+      const group = normalizeGroupText(student.group_name || "");
+      countByGroup[group] = (countByGroup[group] || 0) + 1;
+    });
+
+    const formattedSessions = (sessions as SessionRecord[] | null || []).map((session) => {
+      const group = normalizeGroupText(session.group_name);
+      const presentsCount = session.attendances?.[0]?.count || 0;
+
+      return {
+        id: session.id,
+        code: session.code,
+        subject: session.subject,
+        groupName: session.group_name,
+        date: session.date,
+        startTime: session.start_time,
+        endTime: session.end_time,
+        status: session.status,
+        presents: presentsCount,
+        total: countByGroup[group] || 0,
+      };
+    });
+
+    return NextResponse.json({ success: true, sessions: formattedSessions });
+  } catch (error) {
+    console.error("Error inesperado en GET /api/sessions:", error);
+    return NextResponse.json(
+      { success: false, message: "Error interno del servidor." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  const auth = await requireStaff();
+  if (!auth.ok) return auth.response;
+
+  const body = await readJsonObject(request);
+  if (!body) {
+    return NextResponse.json(
+      { success: false, message: "Cuerpo de solicitud inválido." },
+      { status: 400 }
+    );
+  }
+
+  const subject = cleanString(body.subject, 120);
+  const groupName = normalizeGroupText(cleanString(body.groupName, 20));
+  const date = cleanString(body.date, 10);
+  const startTime = normalizeTimeString(body.startTime);
+  const endTime = normalizeTimeString(body.endTime);
+
+  if (!subject || !groupName || !date || !startTime || !endTime) {
+    return NextResponse.json(
+      { success: false, message: "Todos los campos de la sesión son obligatorios." },
+      { status: 400 }
+    );
+  }
+
+  if (!isValidDateString(date)) {
+    return NextResponse.json(
+      { success: false, message: "La fecha de la sesión no es válida." },
+      { status: 400 }
+    );
+  }
+
+  if (endTime <= startTime) {
+    return NextResponse.json(
+      { success: false, message: "La hora de fin debe ser posterior a la hora de inicio." },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const { supabase, userId } = auth.ctx;
+    let newSession: NewSessionRecord | null = null;
+    let lastError: unknown = null;
+
+    // Código aleatorio + reintento ante la (muy improbable) colisión UNIQUE.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const { data, error } = await supabase
+        .from("sessions")
+        .insert({
+          code: generateSessionCode(),
+          teacher_id: userId,
+          subject,
+          group_name: groupName,
+          date,
+          start_time: startTime,
+          end_time: endTime,
+          status: "ABIERTA",
+        })
+        .select()
+        .single();
+
+      if (!error) {
+        newSession = data;
+        break;
+      }
+
+      lastError = error;
+      if (error.code !== "23505") break;
+    }
+
+    if (!newSession) {
+      console.error("Error creando sesión:", lastError);
+      return NextResponse.json(
+        { success: false, message: "No fue posible crear la sesión." },
+        { status: 500 }
+      );
+    }
+
+    const sessionUrl = `${getAppBaseUrl(request)}/asistencia?sesion=${encodeURIComponent(
+      newSession.code
+    )}`;
     const qrDataUrl = await generateQrDataUrl(sessionUrl);
 
     return NextResponse.json({
@@ -142,9 +196,10 @@ export async function POST(request: Request) {
       qrDataUrl,
       sessionUrl,
     });
-  } catch (err: any) {
+  } catch (error) {
+    console.error("Error inesperado en POST /api/sessions:", error);
     return NextResponse.json(
-      { success: false, message: err.message },
+      { success: false, message: "Error interno del servidor." },
       { status: 500 }
     );
   }

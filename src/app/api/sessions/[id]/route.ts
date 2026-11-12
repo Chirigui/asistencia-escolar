@@ -1,38 +1,73 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { requireStaff } from "@/lib/auth";
 import { generateQrDataUrl } from "@/lib/qr";
+import { normalizeGroupText } from "@/lib/utils";
+import { getAppBaseUrl, isUuid, readJsonObject } from "@/lib/validation";
+
+const SESSION_STATUSES = ["ABIERTA", "CERRADA", "FINALIZADA"] as const;
+
+interface AttendanceRecord {
+  id: string;
+  registered_at: string;
+  status: string;
+  method: string;
+  notes: string | null;
+  student?: {
+    id?: string;
+    document?: string;
+    document_normalized?: string;
+    full_name?: string;
+    grade?: string;
+    group_name?: string;
+  } | null;
+}
+
+interface StudentRecord {
+  id: string;
+  document: string;
+  document_normalized: string;
+  full_name: string;
+  grade: string;
+  group_name: string;
+}
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireStaff();
+  if (!auth.ok) return auth.response;
+
+  const { id } = await params;
+
+  if (!isUuid(id)) {
+    return NextResponse.json(
+      { success: false, message: "Sesión no encontrada." },
+      { status: 404 }
+    );
+  }
+
   try {
-    const supabase = createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const { supabase } = auth.ctx;
 
-    if (authError || !user) {
-      return NextResponse.json({ success: false, message: "No autorizado." }, { status: 401 });
-    }
-
-    const sessionId = params.id;
-    const adminDb = createAdminClient();
-
-    // 1. Obtener datos de la sesión
-    const { data: session, error: sesError } = await adminDb
+    const { data: session, error: sessionError } = await supabase
       .from("sessions")
       .select("*")
-      .eq("id", sessionId)
-      .single();
+      .eq("id", id)
+      .maybeSingle();
 
-    if (sesError || !session) {
-      return NextResponse.json({ success: false, message: "Sesión no encontrada." }, { status: 404 });
+    // RLS oculta las sesiones de otros docentes: para ellos también es 404.
+    if (sessionError || !session) {
+      return NextResponse.json(
+        { success: false, message: "Sesión no encontrada." },
+        { status: 404 }
+      );
     }
 
-    // 2. Obtener asistencias registradas
-    const { data: attendances } = await adminDb
+    const { data: attendances, error: attendancesError } = await supabase
       .from("attendances")
-      .select(`
+      .select(
+        `
         id,
         registered_at,
         status,
@@ -46,22 +81,34 @@ export async function GET(
           grade,
           group_name
         )
-      `)
-      .eq("session_id", sessionId)
+      `
+      )
+      .eq("session_id", session.id)
       .order("registered_at", { ascending: false });
 
-    const presentMap = new Set<string>();
-    const presents = (attendances || []).map((att: any) => {
-      const student = att.student;
+    if (attendancesError) {
+      console.error("Error cargando asistencias:", attendancesError);
+      return NextResponse.json(
+        { success: false, message: "No fue posible cargar las asistencias." },
+        { status: 500 }
+      );
+    }
+
+    const presentStudentIds = new Set<string>();
+    const presentDocuments = new Set<string>();
+    const presents = (attendances as AttendanceRecord[] | null || []).map((attendance) => {
+      const student = attendance.student;
+      if (student?.id) presentStudentIds.add(student.id);
       if (student?.document_normalized) {
-        presentMap.add(student.document_normalized);
+        presentDocuments.add(student.document_normalized);
       }
+
       return {
-        attendanceId: att.id,
-        registeredAt: att.registered_at,
-        status: att.status,
-        method: att.method,
-        notes: att.notes,
+        attendanceId: attendance.id,
+        registeredAt: attendance.registered_at,
+        status: attendance.status,
+        method: attendance.method,
+        notes: attendance.notes,
         document: student?.document || "",
         fullName: student?.full_name || "",
         grade: student?.grade || "",
@@ -69,30 +116,54 @@ export async function GET(
       };
     });
 
-    // 3. Obtener todos los estudiantes activos de este grupo para calcular ausentes
-    const { data: groupStudents } = await adminDb
+    let groupStudents: StudentRecord[] | null = null;
+    const exactGroup = await supabase
       .from("students")
       .select("id, document, document_normalized, full_name, grade, group_name")
       .eq("status", "ACTIVO")
       .eq("group_name", session.group_name);
 
-    const absents: any[] = [];
-    (groupStudents || []).forEach((st) => {
-      if (!presentMap.has(st.document_normalized)) {
-        absents.push({
-          id: st.id,
-          document: st.document,
-          fullName: st.full_name,
-          grade: st.grade,
-          groupName: st.group_name,
-        });
+    if (exactGroup.error) {
+      console.error("Error cargando estudiantes del grupo:", exactGroup.error);
+    } else {
+      groupStudents = exactGroup.data;
+    }
+
+    // Compatibilidad con sesiones antiguas que guardaban "10-A" en vez de "10A".
+    if (!groupStudents || groupStudents.length === 0) {
+      const { data: activeStudents, error: fallbackError } = await supabase
+        .from("students")
+        .select("id, document, document_normalized, full_name, grade, group_name")
+        .eq("status", "ACTIVO")
+        .limit(2000);
+
+      if (!fallbackError) {
+        const targetGroup = normalizeGroupText(session.group_name);
+        groupStudents = (activeStudents || []).filter(
+          (student: { group_name: string | null }) =>
+            normalizeGroupText(student.group_name || "") === targetGroup
+        );
       }
-    });
+    }
 
-    absents.sort((a, b) => a.fullName.localeCompare(b.fullName, "es"));
+    const absents = (groupStudents || [])
+      .filter(
+        (student) =>
+          !presentStudentIds.has(student.id) &&
+          !presentDocuments.has(student.document_normalized)
+      )
+      .map((student) => ({
+        id: student.id,
+        document: student.document,
+        fullName: student.full_name,
+        grade: student.grade,
+        groupName: student.group_name,
+      }))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName, "es"));
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const sessionUrl = `${baseUrl}/asistencia?sesion=${session.code}`;
+    const sessionUrl = `${getAppBaseUrl(request)}/asistencia?sesion=${encodeURIComponent(
+      session.code
+    )}`;
     const qrDataUrl = await generateQrDataUrl(sessionUrl);
 
     return NextResponse.json({
@@ -108,45 +179,74 @@ export async function GET(
       presents,
       absents,
     });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, message: err.message }, { status: 500 });
+  } catch (error) {
+    console.error("Error inesperado en GET /api/sessions/[id]:", error);
+    return NextResponse.json(
+      { success: false, message: "Error interno del servidor." },
+      { status: 500 }
+    );
   }
 }
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireStaff();
+  if (!auth.ok) return auth.response;
+
+  const { id } = await params;
+
+  if (!isUuid(id)) {
+    return NextResponse.json(
+      { success: false, message: "Sesión no encontrada." },
+      { status: 404 }
+    );
+  }
+
+  const body = await readJsonObject(request);
+  const status = body?.status;
+
+  if (
+    typeof status !== "string" ||
+    !SESSION_STATUSES.includes(status as (typeof SESSION_STATUSES)[number])
+  ) {
+    return NextResponse.json(
+      { success: false, message: "Estado de sesión inválido." },
+      { status: 400 }
+    );
+  }
+
   try {
-    const supabase = createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ success: false, message: "No autorizado." }, { status: 401 });
-    }
-
-    const sessionId = params.id;
-    const body = await request.json();
-    const { status } = body;
-
-    if (!["ABIERTA", "CERRADA", "FINALIZADA"].includes(status)) {
-      return NextResponse.json({ success: false, message: "Estado de sesión inválido." }, { status: 400 });
-    }
-
-    const adminDb = createAdminClient();
-    const { data: updated, error } = await adminDb
+    const { supabase } = auth.ctx;
+    const { data: updated, error } = await supabase
       .from("sessions")
       .update({ status, updated_at: new Date().toISOString() })
-      .eq("id", sessionId)
+      .eq("id", id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) {
-      return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+      console.error("Error actualizando sesión:", error);
+      return NextResponse.json(
+        { success: false, message: "No fue posible actualizar la sesión." },
+        { status: 500 }
+      );
+    }
+
+    if (!updated) {
+      return NextResponse.json(
+        { success: false, message: "Sesión no encontrada." },
+        { status: 404 }
+      );
     }
 
     return NextResponse.json({ success: true, session: updated });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, message: err.message }, { status: 500 });
+  } catch (error) {
+    console.error("Error inesperado en PATCH /api/sessions/[id]:", error);
+    return NextResponse.json(
+      { success: false, message: "Error interno del servidor." },
+      { status: 500 }
+    );
   }
 }
