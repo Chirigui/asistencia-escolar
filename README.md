@@ -184,3 +184,7 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 - El panel docente refresca los conteos manualmente; no tiene actualizaciones WebSocket en tiempo real.
 - Los precios y cuotas dependen del plan vigente de cada proveedor. Consulta las páginas de [Vercel](https://vercel.com/pricing) y [Supabase](https://supabase.com/pricing) antes de estimar costos de producción.
 
+## Diseño y rendimiento
+
+Consulta [PERFORMANCE.md](./PERFORMANCE.md) para el detalle de los cambios, mediciones de JavaScript, verificaciones y límites pendientes de la revisión del 12 de noviembre de 2026.
+

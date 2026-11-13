@@ -42,6 +42,7 @@ const nextConfig = {
   poweredByHeader: false,
   async headers() {
     return [
+      { source: "/api/:path*", headers: [{ key: "Cache-Control", value: "private, no-store" }] },
       {
         source: "/:path*",
         headers: securityHeaders,

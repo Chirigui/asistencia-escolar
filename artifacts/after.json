@@ -1,0 +1,17 @@
+{
+  "asistencia": {
+    "scripts": 6,
+    "bytes": 572352,
+    "gzip": 176904
+  },
+  "login": {
+    "scripts": 6,
+    "bytes": 569337,
+    "gzip": 175877
+  },
+  "profesor": {
+    "scripts": 8,
+    "bytes": 860763,
+    "gzip": 251744
+  }
+}

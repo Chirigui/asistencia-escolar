@@ -15,11 +15,6 @@ import {
   AlertCircle,
   RefreshCw,
 } from "lucide-react";
-import {
-  buildCsv,
-  isImportHeaderRow,
-  parseDelimited,
-} from "@/lib/csv";
 
 interface SessionListItem {
   id: string;
@@ -174,6 +169,41 @@ export default function TeacherPanelPage() {
   const [importing, setImporting] = useState(false);
   const [importSuccessMsg, setImportSuccessMsg] = useState("");
 
+  // Keep keyboard focus inside the active dialog and restore its trigger.
+  useEffect(() => {
+    if (!showCreateModal && !selectedSessionId) return;
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const previous = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]'
+    ) ?? []).filter(element => element.getClientRects().length > 0);
+    focusable()[0]?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowCreateModal(false);
+        setSelectedSessionId(null);
+      }
+      if (event.key !== "Tab") return;
+      const elements = focusable();
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (!first) { event.preventDefault(); return; }
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previous?.focus();
+    };
+  }, [showCreateModal, selectedSessionId]);
+
   const loadSessions = useCallback(async () => {
     try {
       setLoadingSessions(true);
@@ -203,6 +233,7 @@ export default function TeacherPanelPage() {
   // Carga inicial y verificación de Auth
   useEffect(() => {
     const checkAuthAndLoad = async () => {
+      void loadSessions();
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
 
@@ -212,7 +243,6 @@ export default function TeacherPanelPage() {
       }
 
       setUserProfile({ email: user.email });
-      loadSessions();
     };
 
     checkAuthAndLoad();
@@ -383,9 +413,10 @@ export default function TeacherPanelPage() {
     }
   };
 
-  const exportReportsCsv = () => {
+  const exportReportsCsv = async () => {
     if (reports.length === 0) return;
 
+    try {
     const headers = [
       "Sesion",
       "Fecha",
@@ -410,6 +441,7 @@ export default function TeacherPanelPage() {
       r.method,
       r.status,
     ]);
+    const { buildCsv } = await import("@/lib/csv");
     const csvContent = buildCsv(headers, rows);
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -420,6 +452,9 @@ export default function TeacherPanelPage() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    } catch {
+      setReportsError("No fue posible preparar la descarga. Intenta de nuevo.");
+    }
   };
 
   const handleParseAndImport = async (dryRun: boolean) => {
@@ -429,6 +464,7 @@ export default function TeacherPanelPage() {
 
     try {
       // Parser con soporte para comillas y comas dentro de campos.
+      const { parseDelimited, isImportHeaderRow } = await import("@/lib/csv");
       const parsed = parseDelimited(importCsvText);
       const firstDataRow = parsed.length > 0 && isImportHeaderRow(parsed[0]) ? 1 : 0;
       const rows = parsed
@@ -485,25 +521,26 @@ export default function TeacherPanelPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
       {/* Barra de navegación superior */}
-      <header className="h-16 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md px-4 sm:px-8 flex items-center justify-between sticky top-0 z-40">
+      <header className="min-h-20 gap-4 flex-wrap py-4 border-b border-slate-200 bg-white/60  px-4 sm:px-8 flex items-center justify-between sticky top-0 z-40">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-600/30">
+          <div className="w-9 h-9 rounded-xl bg-teal-700 text-white flex items-center justify-center font-bold  shadow-lg shadow-teal-900/10">
             <GraduationCap className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-sm font-bold leading-tight">Panel Docente y Administrativo</h1>
-            <p className="text-[11px] text-slate-400 font-mono">{userProfile?.email || "Cargando..."}</p>
+            <h1 className="text-sm font-bold leading-tight">Asistencia · Espacio docente</h1>
+            <p className="text-[11px] text-slate-600 font-mono">{userProfile?.email || "Cargando..."}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <nav className="flex items-center bg-slate-800/80 p-1 rounded-xl border border-slate-700/50 text-xs">
+        <div className="flex items-center gap-3 w-full sm:w-auto overflow-x-auto">
+          <nav className="flex items-center bg-slate-100/80 p-1 rounded-xl border border-slate-200/50 text-xs">
             <button
+              aria-pressed={activeTab === "clases"}
               onClick={() => setActiveTab("clases")}
               className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "clases" ? "bg-blue-600 text-white shadow" : "text-slate-400 hover:text-white"
+                activeTab === "clases" ? "bg-teal-700 text-white  shadow" : "text-slate-600 hover:text-slate-900"
               }`}
             >
               Clases y QR
@@ -514,7 +551,7 @@ export default function TeacherPanelPage() {
                 loadReports();
               }}
               className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "reportes" ? "bg-blue-600 text-white shadow" : "text-slate-400 hover:text-white"
+                activeTab === "reportes" ? "bg-teal-700 text-white  shadow" : "text-slate-600 hover:text-slate-900"
               }`}
             >
               Reportes
@@ -522,7 +559,7 @@ export default function TeacherPanelPage() {
             <button
               onClick={() => setActiveTab("importar")}
               className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "importar" ? "bg-blue-600 text-white shadow" : "text-slate-400 hover:text-white"
+                activeTab === "importar" ? "bg-teal-700 text-white  shadow" : "text-slate-600 hover:text-slate-900"
               }`}
             >
               Importar Matrícula
@@ -532,7 +569,7 @@ export default function TeacherPanelPage() {
           <button
             onClick={handleLogout}
             title="Cerrar sesión"
-            className="p-2 rounded-xl bg-slate-800 hover:bg-rose-950/60 hover:text-rose-400 border border-slate-700 transition-colors text-slate-400"
+            className="p-2 rounded-xl bg-slate-100 hover:bg-rose-950/60 hover:text-rose-400 border border-slate-200 transition-colors text-slate-600"
           >
             <LogOut className="w-4 h-4" />
           </button>
@@ -546,9 +583,9 @@ export default function TeacherPanelPage() {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-xl font-bold">Sesiones de Clase</h2>
-                <p className="text-xs text-slate-400">
-                  Crea una sesión, proyecta su código QR gigante y monitorea asistencia en tiempo real.
+                <h2 className="text-3xl font-bold tracking-tight">Tus clases, de un vistazo</h2>
+                <p className="text-xs text-slate-600">
+                  Crea una sesión, proyecta su código QR gigante y revisa los registros de asistencia.
                 </p>
               </div>
 
@@ -557,13 +594,13 @@ export default function TeacherPanelPage() {
                   onClick={loadSessions}
                   title="Actualizar sesiones"
                   aria-label="Actualizar sesiones"
-                  className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors text-slate-300"
+                  className="p-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 transition-colors text-slate-600"
                 >
                   <RefreshCw className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => setShowCreateModal(true)}
-                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-lg shadow-blue-600/20 transition-all"
+                  className="px-4 py-2.5 bg-teal-700 text-white hover:bg-teal-800 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-lg shadow-teal-900/10 transition-all"
                 >
                   <PlusCircle className="w-4 h-4" />
                   <span>Nueva Clase</span>
@@ -574,7 +611,7 @@ export default function TeacherPanelPage() {
             {sessionsError && (
               <div
                 role="alert"
-                className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-3"
+                className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-700 text-xs flex items-start gap-3"
               >
                 <AlertCircle className="w-5 h-5 shrink-0" />
                 <span>{sessionsError}</span>
@@ -586,15 +623,15 @@ export default function TeacherPanelPage() {
                 Cargando sesiones...
               </div>
             ) : sessions.length === 0 ? (
-              <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl bg-slate-900/30">
+              <div className="p-12 text-center border border-dashed border-slate-200 rounded-2xl bg-white/30">
                 <QrCode className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                <h3 className="font-semibold text-slate-300">No hay sesiones creadas</h3>
+                <h3 className="font-semibold text-slate-600">No hay sesiones creadas</h3>
                 <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
                   Crea tu primera clase para generar el código QR de asistencia y proyectarlo a tus alumnos.
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="session-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                 {sessions.map((ses) => (
                   <div
                     key={ses.id}
@@ -608,42 +645,42 @@ export default function TeacherPanelPage() {
                         openSessionDetail(ses.id);
                       }
                     }}
-                    className="p-5 bg-slate-900 border border-slate-800 rounded-2xl hover:border-blue-500/50 hover:bg-slate-900/80 focus:outline-none focus:ring-2 focus:ring-blue-500/60 cursor-pointer transition-all flex flex-col justify-between group"
+                    className="p-5 bg-white border border-slate-200 rounded-2xl hover:border-blue-500/50 hover:bg-white/80 focus:outline-none focus:ring-2 focus:ring-blue-500/60 cursor-pointer transition-all flex flex-col justify-between group"
                   >
                     <div>
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-mono font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-md border border-blue-500/20">
+                        <span className="text-xs font-mono font-bold text-teal-700 bg-blue-500/10 px-2 py-0.5 rounded-md border border-blue-500/20">
                           {ses.code}
                         </span>
                         <span
                           className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                             ses.status === "ABIERTA"
-                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                              : "bg-slate-800 text-slate-400"
+                              ? "bg-emerald-500/10 text-emerald-700 border border-emerald-500/20"
+                              : "bg-slate-100 text-slate-600"
                           }`}
                         >
                           {ses.status}
                         </span>
                       </div>
-                      <h3 className="font-bold text-base text-white group-hover:text-blue-400 transition-colors">
+                      <h3 className="font-bold text-base text-slate-900 group-hover:text-teal-700 transition-colors">
                         {ses.subject}
                       </h3>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Grupo <span className="text-slate-200 font-semibold">{ses.groupName}</span> · {ses.date}
+                      <p className="text-xs text-slate-600 mt-1">
+                        Grupo <span className="text-slate-700 font-semibold">{ses.groupName}</span> · {ses.date}
                       </p>
                       <p className="text-xs text-slate-500 mt-0.5">
                         {ses.startTime.slice(0, 5)} - {ses.endTime.slice(0, 5)}
                       </p>
                     </div>
 
-                    <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-1.5 text-slate-300">
+                    <div className="mt-4 pt-3 border-t border-slate-200/80 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5 text-slate-600">
                         <Users className="w-3.5 h-3.5 text-slate-500" />
                         <span>
-                          <strong className="text-white">{ses.presents}</strong> / {ses.total} presentes
+                          <strong className="text-slate-900">{ses.presents}</strong> / {ses.total} presentes
                         </span>
                       </div>
-                      <span className="text-blue-400 text-xs font-medium group-hover:translate-x-0.5 transition-transform">
+                      <span className="text-teal-700 text-xs font-medium group-hover:translate-x-0.5 transition-transform">
                         Ver panel →
                       </span>
                     </div>
@@ -659,8 +696,8 @@ export default function TeacherPanelPage() {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-xl font-bold">Reportes de Asistencia</h2>
-                <p className="text-xs text-slate-400">
+                <h2 className="text-3xl font-bold tracking-tight">Reportes de Asistencia</h2>
+                <p className="text-xs text-slate-600">
                   Filtra por fechas, grupo y materias, y exporta en formato CSV para Excel.
                 </p>
               </div>
@@ -668,7 +705,7 @@ export default function TeacherPanelPage() {
               <button
                 onClick={exportReportsCsv}
                 disabled={reports.length === 0}
-                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all text-white"
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-100 disabled:text-slate-600 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all text-slate-900"
               >
                 <Download className="w-4 h-4" />
                 <span>Exportar CSV</span>
@@ -676,9 +713,9 @@ export default function TeacherPanelPage() {
             </div>
 
             {/* Filtros */}
-            <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl grid grid-cols-1 sm:grid-cols-5 gap-3 text-xs">
+            <div className="p-4 bg-white border border-slate-200 rounded-2xl grid grid-cols-1 sm:grid-cols-5 gap-3 text-xs">
               <div>
-                <label htmlFor="report-date-from" className="block text-slate-400 mb-1">
+                <label htmlFor="report-date-from" className="block text-slate-600 mb-1">
                   Fecha Desde
                 </label>
                 <input
@@ -686,11 +723,11 @@ export default function TeacherPanelPage() {
                   type="date"
                   value={reportFilters.dateFrom}
                   onChange={(e) => setReportFilters({ ...reportFilters, dateFrom: e.target.value })}
-                  className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-white"
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
                 />
               </div>
               <div>
-                <label htmlFor="report-date-to" className="block text-slate-400 mb-1">
+                <label htmlFor="report-date-to" className="block text-slate-600 mb-1">
                   Fecha Hasta
                 </label>
                 <input
@@ -698,11 +735,11 @@ export default function TeacherPanelPage() {
                   type="date"
                   value={reportFilters.dateTo}
                   onChange={(e) => setReportFilters({ ...reportFilters, dateTo: e.target.value })}
-                  className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-white"
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
                 />
               </div>
               <div>
-                <label htmlFor="report-group" className="block text-slate-400 mb-1">
+                <label htmlFor="report-group" className="block text-slate-600 mb-1">
                   Grupo
                 </label>
                 <input
@@ -712,11 +749,11 @@ export default function TeacherPanelPage() {
                   placeholder="Ej: 10A"
                   value={reportFilters.groupName}
                   onChange={(e) => setReportFilters({ ...reportFilters, groupName: e.target.value })}
-                  className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-white"
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
                 />
               </div>
               <div>
-                <label htmlFor="report-subject" className="block text-slate-400 mb-1">
+                <label htmlFor="report-subject" className="block text-slate-600 mb-1">
                   Materia
                 </label>
                 <input
@@ -726,14 +763,14 @@ export default function TeacherPanelPage() {
                   placeholder="Ej: Matemáticas"
                   value={reportFilters.subject}
                   onChange={(e) => setReportFilters({ ...reportFilters, subject: e.target.value })}
-                  className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-white"
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
                 />
               </div>
               <div className="flex items-end">
                 <button
                   onClick={loadReports}
                   disabled={loadingReports}
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 rounded-lg font-semibold text-white transition-colors"
+                  className="w-full py-2 bg-teal-700 text-white hover:bg-teal-800 disabled:bg-slate-100 disabled:text-slate-500 rounded-lg font-semibold  transition-colors"
                 >
                   {loadingReports ? "Consultando..." : "Aplicar Filtros"}
                 </button>
@@ -743,7 +780,7 @@ export default function TeacherPanelPage() {
             {reportsError && (
               <div
                 role="alert"
-                className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-3"
+                className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-700 text-xs flex items-start gap-3"
               >
                 <AlertCircle className="w-5 h-5 shrink-0" />
                 <span>{reportsError}</span>
@@ -753,7 +790,7 @@ export default function TeacherPanelPage() {
             {reportsTruncated && (
               <div
                 role="status"
-                className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs"
+                className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 text-xs"
               >
                 El reporte supera las 10.000 filas y fue truncado. Ajusta el rango de
                 fechas o los filtros para exportar el resto.
@@ -761,15 +798,15 @@ export default function TeacherPanelPage() {
             )}
 
             {/* Tabla de registros */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-              <div className="p-4 border-b border-slate-800 flex items-center justify-between text-xs">
-                <span className="text-slate-400 font-medium">
-                  Total de registros encontrados: <strong className="text-white">{reports.length}</strong>
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+              <div className="p-4 border-b border-slate-200 flex items-center justify-between text-xs">
+                <span className="text-slate-600 font-medium">
+                  Total de registros encontrados: <strong className="text-slate-900">{reports.length}</strong>
                 </span>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="bg-slate-950 text-slate-400 font-medium border-b border-slate-800">
+                <table className="w-full text-left text-xs text-slate-600">
+                  <thead className="bg-slate-50 text-slate-600 font-medium border-b border-slate-200">
                     <tr>
                       <th className="p-3">Sesión</th>
                       <th className="p-3">Fecha</th>
@@ -783,19 +820,19 @@ export default function TeacherPanelPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
                     {reports.map((row) => (
-                      <tr key={row.id} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3 font-mono font-bold text-blue-400">{row.sessionCode}</td>
+                      <tr key={row.id} className="hover:bg-slate-100/40 transition-colors">
+                        <td className="p-3 font-mono font-bold text-teal-700">{row.sessionCode}</td>
                         <td className="p-3">{row.date}</td>
                         <td className="p-3 font-mono">{new Date(row.registeredAt).toLocaleTimeString().slice(0, 5)}</td>
                         <td className="p-3 font-mono">{row.document}</td>
-                        <td className="p-3 font-medium text-white">{row.studentName}</td>
+                        <td className="p-3 font-medium text-slate-900">{row.studentName}</td>
                         <td className="p-3">{row.group}</td>
                         <td className="p-3">{row.subject}</td>
                         <td className="p-3">
                           <span
                             className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                               row.method === "QR"
-                                ? "bg-blue-500/10 text-blue-400"
+                                ? "bg-blue-500/10 text-teal-700"
                                 : "bg-purple-500/10 text-purple-400"
                             }`}
                           >
@@ -822,16 +859,16 @@ export default function TeacherPanelPage() {
         {activeTab === "importar" && (
           <div className="space-y-6 max-w-4xl">
             <div>
-              <h2 className="text-xl font-bold">Importador Masivo de Estudiantes</h2>
-              <p className="text-xs text-slate-400">
+              <h2 className="text-3xl font-bold tracking-tight">Importador Masivo de Estudiantes</h2>
+              <p className="text-xs text-slate-600">
                 Pega directamente tus filas de Excel o CSV con las columnas: <br />
-                <code className="text-blue-400 font-mono">Documento, Nombre Completo, Grado, Grupo, Estado</code>
+                <code className="text-teal-700 font-mono">Documento, Nombre Completo, Grado, Grupo, Estado</code>
               </p>
             </div>
 
             {importSuccessMsg && (
               <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-2xl text-xs flex items-center gap-3">
-                <CheckCircle className="w-5 h-5 text-emerald-400" />
+                <CheckCircle className="w-5 h-5 text-emerald-700" />
                 <span>{importSuccessMsg}</span>
               </div>
             )}
@@ -845,21 +882,21 @@ export default function TeacherPanelPage() {
                 value={importCsvText}
                 onChange={(e) => setImportCsvText(e.target.value)}
                 placeholder={"1000000020,Estudiante Ejemplo Uno,10,10A,ACTIVO\n1000000021,Estudiante Ejemplo Dos,10,10A,ACTIVO"}
-                className="w-full p-4 bg-slate-900 border border-slate-800 rounded-2xl font-mono text-xs text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                className="w-full p-4 bg-white border border-slate-200 rounded-2xl font-mono text-xs text-slate-900 placeholder-slate-600 focus:outline-none focus:border-blue-500"
               />
 
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => handleParseAndImport(true)}
                   disabled={importing || !importCsvText.trim()}
-                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors"
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-700 disabled:opacity-50 text-slate-900 rounded-xl text-xs font-semibold transition-colors"
                 >
                   Previsualizar y Validar
                 </button>
                 <button
                   onClick={() => handleParseAndImport(false)}
                   disabled={importing || !importCsvText.trim()}
-                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-lg shadow-blue-600/20 transition-colors"
+                  className="px-4 py-2.5 bg-teal-700 text-white hover:bg-teal-800 disabled:opacity-50  rounded-xl text-xs font-semibold shadow-lg shadow-teal-900/10 transition-colors"
                 >
                   Importar a Base de Datos
                 </button>
@@ -867,21 +904,21 @@ export default function TeacherPanelPage() {
             </div>
 
             {importPreview && (
-              <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
+              <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-4">
                 <div className="grid grid-cols-4 gap-3 text-center text-xs">
-                  <div className="p-3 bg-slate-950 rounded-xl">
+                  <div className="p-3 bg-slate-50 rounded-xl">
                     <p className="text-slate-500">Filas Totales</p>
-                    <p className="text-lg font-bold text-white mt-1">{importPreview.summary.total}</p>
+                    <p className="text-lg font-bold text-slate-900 mt-1">{importPreview.summary.total}</p>
                   </div>
-                  <div className="p-3 bg-slate-950 rounded-xl">
+                  <div className="p-3 bg-slate-50 rounded-xl">
                     <p className="text-slate-500">Válidas</p>
-                    <p className="text-lg font-bold text-emerald-400 mt-1">{importPreview.summary.valid}</p>
+                    <p className="text-lg font-bold text-emerald-700 mt-1">{importPreview.summary.valid}</p>
                   </div>
-                  <div className="p-3 bg-slate-950 rounded-xl">
+                  <div className="p-3 bg-slate-50 rounded-xl">
                     <p className="text-slate-500">Duplicados</p>
                     <p className="text-lg font-bold text-amber-400 mt-1">{importPreview.summary.duplicates}</p>
                   </div>
-                  <div className="p-3 bg-slate-950 rounded-xl">
+                  <div className="p-3 bg-slate-50 rounded-xl">
                     <p className="text-slate-500">Inválidos</p>
                     <p className="text-lg font-bold text-rose-400 mt-1">{importPreview.summary.invalid}</p>
                   </div>
@@ -889,7 +926,7 @@ export default function TeacherPanelPage() {
 
                 <div className="overflow-x-auto max-h-60 overflow-y-auto">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-950 text-slate-400 sticky top-0">
+                    <thead className="bg-slate-50 text-slate-600 sticky top-0">
                       <tr>
                         <th className="p-2">#</th>
                         <th className="p-2">Doc</th>
@@ -907,7 +944,7 @@ export default function TeacherPanelPage() {
                           <td className="p-2">{p.groupName}</td>
                           <td className="p-2">
                             {p.valid ? (
-                              <span className="text-emerald-400 font-bold">Válido</span>
+                              <span className="text-emerald-700 font-bold">Válido</span>
                             ) : (
                               <span className="text-rose-400">{p.errors.join(", ")}</span>
                             )}
@@ -931,22 +968,22 @@ export default function TeacherPanelPage() {
           aria-modal="true"
           aria-labelledby="create-session-title"
         >
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-6 shadow-xl shadow-slate-200/60 relative">
             <button
               onClick={() => setShowCreateModal(false)}
               aria-label="Cerrar creación de clase"
-              className="absolute right-4 top-4 text-slate-400 hover:text-white"
+              className="absolute right-4 top-4 text-slate-600 hover:text-slate-900"
             >
               <X className="w-5 h-5" />
             </button>
             <h3 id="create-session-title" className="text-lg font-bold mb-1">
               Crear Nueva Clase
             </h3>
-            <p className="text-xs text-slate-400 mb-5">Define la asignatura y el grupo para generar el código QR.</p>
+            <p className="text-xs text-slate-600 mb-5">Define la asignatura y el grupo para generar el código QR.</p>
 
             <form onSubmit={handleCreateSession} className="space-y-4 text-xs">
               <div>
-                <label htmlFor="create-subject" className="block text-slate-300 mb-1">
+                <label htmlFor="create-subject" className="block text-slate-600 mb-1">
                   Materia / Asignatura
                 </label>
                 <input
@@ -957,13 +994,13 @@ export default function TeacherPanelPage() {
                   placeholder="Ej: Matemáticas Avanzadas"
                   value={createForm.subject}
                   onChange={(e) => setCreateForm({ ...createForm, subject: e.target.value })}
-                  className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-sm"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="create-group" className="block text-slate-300 mb-1">
+                  <label htmlFor="create-group" className="block text-slate-600 mb-1">
                     Grupo
                   </label>
                   <input
@@ -974,11 +1011,11 @@ export default function TeacherPanelPage() {
                     placeholder="Ej: 10A"
                     value={createForm.groupName}
                     onChange={(e) => setCreateForm({ ...createForm, groupName: e.target.value })}
-                    className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900"
                   />
                 </div>
                 <div>
-                  <label htmlFor="create-date" className="block text-slate-300 mb-1">
+                  <label htmlFor="create-date" className="block text-slate-600 mb-1">
                     Fecha
                   </label>
                   <input
@@ -987,14 +1024,14 @@ export default function TeacherPanelPage() {
                     required
                     value={createForm.date}
                     onChange={(e) => setCreateForm({ ...createForm, date: e.target.value })}
-                    className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="create-start-time" className="block text-slate-300 mb-1">
+                  <label htmlFor="create-start-time" className="block text-slate-600 mb-1">
                     Hora Inicio
                   </label>
                   <input
@@ -1003,11 +1040,11 @@ export default function TeacherPanelPage() {
                     required
                     value={createForm.startTime}
                     onChange={(e) => setCreateForm({ ...createForm, startTime: e.target.value })}
-                    className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900"
                   />
                 </div>
                 <div>
-                  <label htmlFor="create-end-time" className="block text-slate-300 mb-1">
+                  <label htmlFor="create-end-time" className="block text-slate-600 mb-1">
                     Hora Fin
                   </label>
                   <input
@@ -1016,7 +1053,7 @@ export default function TeacherPanelPage() {
                     required
                     value={createForm.endTime}
                     onChange={(e) => setCreateForm({ ...createForm, endTime: e.target.value })}
-                    className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900"
                   />
                 </div>
               </div>
@@ -1024,7 +1061,7 @@ export default function TeacherPanelPage() {
               <button
                 type="submit"
                 disabled={creating}
-                className="w-full mt-2 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-semibold rounded-xl text-sm transition-all shadow-lg shadow-blue-600/20"
+                className="w-full mt-2 py-3 bg-teal-700 text-white hover:bg-teal-800 disabled:bg-slate-100  font-semibold rounded-xl text-sm transition-all shadow-lg shadow-teal-900/10"
               >
                 {creating ? "Generando sesión..." : "Crear y Mostrar QR"}
               </button>
@@ -1036,42 +1073,42 @@ export default function TeacherPanelPage() {
       {/* MODAL: DETALLE DE SESIÓN / PROYECTOR QR */}
       {selectedSessionId && (
         <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+          className="fixed inset-0 bg-black/80  z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
           role="dialog"
           aria-modal="true"
           aria-labelledby="session-detail-title"
         >
-          <div className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative my-auto">
+          <div className="w-full max-w-4xl bg-white border border-slate-200 rounded-3xl p-6 shadow-xl shadow-slate-200/60 relative my-auto">
             <button
               onClick={() => setSelectedSessionId(null)}
               aria-label="Cerrar detalle de sesión"
-              className="absolute right-4 top-4 text-slate-400 hover:text-white p-1"
+              className="absolute right-4 top-4 text-slate-600 hover:text-slate-900 p-1"
             >
               <X className="w-6 h-6" />
             </button>
 
             {loadingDetail ? (
-              <div className="py-24 text-center text-slate-400 text-sm">
+              <div className="py-24 text-center text-slate-600 text-sm">
                 Cargando detalles de la clase...
               </div>
             ) : detailError ? (
               <div
                 role="alert"
-                className="my-12 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-start gap-3"
+                className="my-12 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-700 text-sm flex items-start gap-3"
               >
                 <AlertCircle className="w-5 h-5 shrink-0" />
                 <span>{detailError}</span>
               </div>
             ) : !sessionDetail ? (
-              <div className="py-24 text-center text-slate-400 text-sm">
+              <div className="py-24 text-center text-slate-600 text-sm">
                 No hay información disponible.
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Lado Izquierdo: QR Gigante para proyector */}
-                <div className="flex flex-col items-center justify-center p-6 bg-slate-950 border border-slate-800 rounded-2xl text-center">
+                <div className="flex flex-col items-center justify-center p-6 bg-slate-50 border border-slate-200 rounded-2xl text-center">
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="font-mono font-bold text-xs px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400">
+                    <span className="font-mono font-bold text-xs px-2.5 py-0.5 rounded-full bg-blue-500/20 text-teal-700">
                       CÓDIGO: {sessionDetail.session.code}
                     </span>
                     <button
@@ -1080,7 +1117,7 @@ export default function TeacherPanelPage() {
                       aria-busy={statusUpdating}
                       className={`text-xs font-bold px-3 py-0.5 rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                         sessionDetail.session.status === "ABIERTA"
-                          ? "bg-rose-500/20 border-rose-500/30 text-rose-300 hover:bg-rose-500/30"
+                          ? "bg-rose-500/20 border-rose-500/30 text-rose-700 hover:bg-rose-500/30"
                           : "bg-emerald-500/20 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30"
                       }`}
                     >
@@ -1092,15 +1129,15 @@ export default function TeacherPanelPage() {
                     </button>
                   </div>
 
-                  <h3 id="session-detail-title" className="text-xl font-bold text-white mb-1">
+                  <h3 id="session-detail-title" className="text-3xl font-bold tracking-tight text-slate-900 mb-1">
                     {sessionDetail.session.subject}
                   </h3>
-                  <p className="text-xs text-slate-400 mb-4">
+                  <p className="text-xs text-slate-600 mb-4">
                     Grupo <strong>{sessionDetail.session.group_name}</strong> · {sessionDetail.session.date}
                   </p>
 
                   {/* QR Image nativa */}
-                  <div className="p-3 bg-white rounded-2xl shadow-2xl mb-3">
+                  <div className="p-3 bg-white rounded-2xl shadow-xl shadow-slate-200/60 mb-3">
                     <img
                       src={sessionDetail.qrDataUrl}
                       alt="Código QR de Asistencia"
@@ -1108,7 +1145,7 @@ export default function TeacherPanelPage() {
                     />
                   </div>
 
-                  <p className="text-xs text-slate-400 font-mono break-all max-w-xs">
+                  <p className="text-xs text-slate-600 font-mono break-all max-w-xs">
                     {sessionDetail.sessionUrl}
                   </p>
                 </div>
@@ -1118,23 +1155,23 @@ export default function TeacherPanelPage() {
                   <div>
                     {/* Estadísticas rápidas */}
                     <div className="grid grid-cols-3 gap-2 mb-4 text-center">
-                      <div className="p-2.5 bg-slate-950 border border-slate-800 rounded-xl">
+                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
                         <p className="text-[10px] text-slate-500">Total Grupo</p>
-                        <p className="text-base font-bold text-white">{sessionDetail.stats.total}</p>
+                        <p className="text-base font-bold text-slate-900">{sessionDetail.stats.total}</p>
                       </div>
-                      <div className="p-2.5 bg-slate-950 border border-slate-800 rounded-xl">
+                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
                         <p className="text-[10px] text-slate-500">Presentes</p>
-                        <p className="text-base font-bold text-emerald-400">{sessionDetail.stats.presentsCount}</p>
+                        <p className="text-base font-bold text-emerald-700">{sessionDetail.stats.presentsCount}</p>
                       </div>
-                      <div className="p-2.5 bg-slate-950 border border-slate-800 rounded-xl">
+                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
                         <p className="text-[10px] text-slate-500">Ausentes</p>
                         <p className="text-base font-bold text-rose-400">{sessionDetail.stats.absentsCount}</p>
                       </div>
                     </div>
 
                     {/* Marcado Manual Rápido */}
-                    <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl mb-4 text-xs">
-                      <p className="font-semibold text-slate-300 mb-2">Marcado Manual Docente</p>
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4 text-xs">
+                      <p className="font-semibold text-slate-600 mb-2">Marcado Manual Docente</p>
                       <div className="flex gap-2">
                         <input
                           type="text"
@@ -1149,12 +1186,12 @@ export default function TeacherPanelPage() {
                               handleManualAttendance();
                             }
                           }}
-                          className="flex-1 p-2 bg-slate-900 border border-slate-800 rounded-lg text-white"
+                          className="flex-1 p-2 bg-white border border-slate-200 rounded-lg text-slate-900"
                         />
                         <button
                           onClick={() => handleManualAttendance()}
                           disabled={manualSubmitting || !manualDocument.trim()}
-                          className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg font-semibold"
+                          className="px-3 py-2 bg-teal-700 text-white hover:bg-teal-800 disabled:opacity-50  rounded-lg font-semibold"
                         >
                           {manualSubmitting ? "Marcando..." : "Marcar"}
                         </button>
@@ -1163,7 +1200,7 @@ export default function TeacherPanelPage() {
 
                     {/* Lista de Presentes y Ausentes */}
                     <div className="text-xs mb-2 flex items-center justify-between">
-                      <span className="font-bold text-slate-300">Lista de la sesión</span>
+                      <span className="font-bold text-slate-600">Lista de la sesión</span>
                       <input
                         type="text"
                         maxLength={80}
@@ -1171,7 +1208,7 @@ export default function TeacherPanelPage() {
                         placeholder="Filtrar por nombre..."
                         value={searchFilter}
                         onChange={(e) => setSearchFilter(e.target.value.toLowerCase())}
-                        className="px-2 py-1 bg-slate-950 border border-slate-800 rounded text-slate-200 text-[11px]"
+                        className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-slate-700 text-[11px]"
                       />
                     </div>
 
@@ -1188,7 +1225,7 @@ export default function TeacherPanelPage() {
                               <p className="font-bold text-emerald-300">{p.fullName}</p>
                               <p className="text-[10px] text-slate-500 font-mono">{p.document}</p>
                             </div>
-                            <span className="text-[10px] font-mono text-emerald-400">
+                            <span className="text-[10px] font-mono text-emerald-700">
                               {new Date(p.registeredAt).toLocaleTimeString().slice(0, 5)}
                             </span>
                           </div>
@@ -1200,15 +1237,15 @@ export default function TeacherPanelPage() {
                         .map((a) => (
                           <div
                             key={a.id}
-                            className="p-2 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between"
+                            className="p-2 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between"
                           >
                             <div>
-                              <p className="font-medium text-slate-300">{a.fullName}</p>
+                              <p className="font-medium text-slate-600">{a.fullName}</p>
                               <p className="text-[10px] text-slate-500 font-mono">{a.document}</p>
                             </div>
                             <button
                               onClick={() => handleManualAttendance(a.document)}
-                              className="px-2 py-1 bg-slate-800 hover:bg-blue-600 rounded text-[10px] text-slate-300 hover:text-white transition-colors"
+                              className="px-2 py-1 bg-slate-100 hover:bg-teal-700 hover:text-white rounded text-[10px] text-slate-600  transition-colors"
                             >
                               + Presente
                             </button>
@@ -1217,10 +1254,10 @@ export default function TeacherPanelPage() {
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-slate-800 mt-4 text-right">
+                  <div className="pt-3 border-t border-slate-200 mt-4 text-right">
                     <button
                       onClick={() => openSessionDetail(sessionDetail.session.id)}
-                      className="text-xs text-blue-400 hover:underline flex items-center gap-1 ml-auto"
+                      className="text-xs text-teal-700 hover:underline flex items-center gap-1 ml-auto"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
                       <span>Actualizar lista</span>

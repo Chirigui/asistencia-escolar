@@ -38,7 +38,8 @@ export async function GET() {
     // sesiones y permite a los administradores ver todas.
     const { supabase } = auth.ctx;
 
-    const { data: sessions, error } = await supabase
+    const [{ data: sessions, error }, { data: students, error: studentsError }] = await Promise.all([
+      supabase
       .from("sessions")
       .select(
         `
@@ -54,7 +55,12 @@ export async function GET() {
         attendances (count)
       `
       )
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false }),
+      supabase
+      .from("students")
+      .select("group_name")
+      .eq("status", "ACTIVO")
+    ]);
 
     if (error) {
       console.error("Error listando sesiones:", error);
@@ -63,11 +69,6 @@ export async function GET() {
         { status: 500 }
       );
     }
-
-    const { data: students, error: studentsError } = await supabase
-      .from("students")
-      .select("group_name")
-      .eq("status", "ACTIVO");
 
     if (studentsError) {
       console.error("Error contando estudiantes por grupo:", studentsError);
