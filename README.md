@@ -7,7 +7,7 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 - **Aplicación:** [asistencia-escolar-julian-fc62.vercel.app](https://asistencia-escolar-julian-fc62.vercel.app) — despliegue de producción listo en Vercel.
 - **Código:** la rama `main` de [Chirigui/asistencia-escolar](https://github.com/Chirigui/asistencia-escolar) activa los despliegues automáticos.
 - **Base de datos:** la migración `20261112_security_hardening.sql` ya está aplicada al proyecto Supabase de producción.
-- **Última publicación:** commit `fdc612f` (12 de noviembre de 2026). El despliegue anterior detectó un middleware obsoleto; se eliminó para dejar sólo el Proxy compatible con Next.js 16.
+- **Última actualización de la aplicación:** commit `fdc612f` (12 de noviembre de 2026). El despliegue anterior detectó un middleware obsoleto; se eliminó para dejar sólo el Proxy compatible con Next.js 16.
 - **Verificación del release:** 38 pruebas, ESLint y compilación de producción completados correctamente.
 
 ---
@@ -28,7 +28,7 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 ```text
 ├── .env.example                     # Plantilla de variables de entorno seguras
 ├── .gitignore                       # Exclusiones de control de versiones
-├── eslint.config.mjs                # Configuración ESLint 9 (flat config)
+├── eslint.config.mjs                # Configuración ESLint 10 (flat config)
 ├── package.json                     # Scripts y dependencias
 ├── tsconfig.json                    # Configuración TypeScript con alias @/*
 ├── tailwind.config.js               # Configuración de estilos Tailwind
