@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { AcademicData } from "@/types/academic";
+import { sessionWindow } from "@/lib/session-window";
 const ReportsPanel = dynamic(() => import("@/components/teacher/reports-panel"), {
   loading: () => (
     <p role="status" className="p-8">
@@ -33,15 +34,6 @@ import {
 
 import type { SessionListItem, SessionDetail, ReportRow, ImportPreview } from "@/types/teacher";
 
-function todayInputValue(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Bogota",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-}
-
 export default function TeacherPanelPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"clases" | "reportes" | "importar" | "academico">(
@@ -60,13 +52,12 @@ export default function TeacherPanelPage() {
 
   // Modal nueva clase
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState({
+  const [createForm, setCreateForm] = useState(() => ({
     subject: "",
     groupName: "",
-    date: todayInputValue(),
-    startTime: "07:00",
-    endTime: "08:30",
-  });
+    ...sessionWindow(),
+    startNow: true,
+  }));
   const [creating, setCreating] = useState(false);
 
   // Modal detalle de sesión / Proyector QR
@@ -575,7 +566,11 @@ export default function TeacherPanelPage() {
                   <RefreshCw className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => setShowCreateModal(true)}
+                  onClick={() => {
+                    setCreateForm((form) => ({ ...form, ...sessionWindow(), startNow: true }));
+                    setShowCreateModal(true);
+                    void loadAcademic();
+                  }}
                   className="px-4 py-2.5 bg-teal-700 text-white hover:bg-teal-800 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-lg shadow-teal-900/10 transition-all"
                 >
                   <PlusCircle className="w-4 h-4" />
@@ -712,7 +707,14 @@ export default function TeacherPanelPage() {
           </button>
         )}
         {activeTab === "academico" && userProfile?.role === "admin" && academic && (
-          <AcademicPanel data={academic} onSaved={loadAcademic} />
+          <AcademicPanel
+            data={academic}
+            onSaved={() => {
+              void loadAcademic();
+              void loadSessions();
+              setReports([]);
+            }}
+          />
         )}
       </main>
 
@@ -724,7 +726,7 @@ export default function TeacherPanelPage() {
           aria-modal="true"
           aria-labelledby="create-session-title"
         >
-          <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-6 shadow-xl shadow-slate-200/60 relative">
+          <div className="w-full max-w-md max-h-[90dvh] overflow-y-auto bg-white border border-slate-200 rounded-3xl p-6 shadow-xl shadow-slate-200/60 relative">
             <button
               onClick={() => setShowCreateModal(false)}
               aria-label="Cerrar creación de clase"
@@ -768,14 +770,16 @@ export default function TeacherPanelPage() {
                     onChange={(e) => setCreateForm({ ...createForm, groupName: e.target.value })}
                     className="w-full p-2.5 border border-slate-200 rounded-xl"
                   >
-                    <option value="">Selecciona un grupo asignado</option>
+                    <option value="">Selecciona un grupo</option>
                     {Array.from(
                       new Set(
-                        (academic?.assignments || [])
-                          .filter((a) =>
-                            academic?.periods.some((p) => p.id === a.period_id && p.active),
-                          )
-                          .map((a) => a.group.name),
+                        academic?.role === "admin"
+                          ? (academic.groups || []).map((g) => g.name)
+                          : (academic?.assignments || [])
+                              .filter((a) =>
+                                academic?.periods.some((p) => p.id === a.period_id && p.active),
+                              )
+                              .map((a) => a.group.name),
                       ),
                     ).map((group) => (
                       <option key={group} value={group}>
@@ -791,6 +795,7 @@ export default function TeacherPanelPage() {
                   <input
                     id="create-date"
                     type="date"
+                    readOnly={createForm.startNow}
                     required
                     value={createForm.date}
                     onChange={(e) => setCreateForm({ ...createForm, date: e.target.value })}
@@ -799,6 +804,21 @@ export default function TeacherPanelPage() {
                 </div>
               </div>
 
+              <label className="flex items-start gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={createForm.startNow}
+                  onChange={(e) =>
+                    setCreateForm({ ...createForm, ...sessionWindow(), startNow: e.target.checked })
+                  }
+                />
+                Abrir ahora durante 10 minutos. La hora exacta se toma al crear, según el servidor
+                (Colombia).
+              </label>
+              <p className="text-xs text-slate-600">
+                Sin minutos de tolerancia adicionales. El QR deja de aceptar registros al terminar
+                la ventana, aunque siga visible. Un QR no garantiza presencia física.
+              </p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="create-start-time" className="block text-slate-600 mb-1">
@@ -807,6 +827,8 @@ export default function TeacherPanelPage() {
                   <input
                     id="create-start-time"
                     type="time"
+                    step="1"
+                    readOnly={createForm.startNow}
                     required
                     value={createForm.startTime}
                     onChange={(e) => setCreateForm({ ...createForm, startTime: e.target.value })}
@@ -820,6 +842,8 @@ export default function TeacherPanelPage() {
                   <input
                     id="create-end-time"
                     type="time"
+                    step="1"
+                    readOnly={createForm.startNow}
                     required
                     value={createForm.endTime}
                     onChange={(e) => setCreateForm({ ...createForm, endTime: e.target.value })}

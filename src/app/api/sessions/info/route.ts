@@ -54,7 +54,9 @@ export async function GET(request: Request) {
 
     const { data: session, error } = await supabase
       .from("sessions")
-      .select("code, subject, group_name, date, start_time, end_time, status, qr_token_required")
+      .select(
+        "code, subject, group_name, date, start_time, end_time, status, qr_token_required,registration_opens_at,registration_closes_at",
+      )
       .eq("code", code)
       .maybeSingle();
 
@@ -94,7 +96,23 @@ export async function GET(request: Request) {
       );
     }
 
-    if (session.date !== todayInAppTimeZone()) {
+    const now = Date.now();
+    if (
+      session.registration_opens_at &&
+      session.registration_closes_at &&
+      (now < Date.parse(session.registration_opens_at) ||
+        now >= Date.parse(session.registration_closes_at))
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "La ventana de registro no está abierta. Sólo puedes registrar asistencia dentro del horario indicado.",
+        },
+        { status: 409 },
+      );
+    }
+    if (!session.registration_opens_at && session.date !== todayInAppTimeZone()) {
       return NextResponse.json(
         {
           success: false,

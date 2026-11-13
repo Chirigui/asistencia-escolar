@@ -49,6 +49,7 @@ try {
     await setup.query(await readFile("supabase/migrations/" + name, "utf8"));
   }
   await setup.query(await readFile("supabase/tests/regression.sql", "utf8"));
+  await setup.query(await readFile("supabase/tests/maintenance.sql", "utf8"));
   await setup.query("INSERT INTO auth.users(id,email) VALUES($1,$2)", [
     teacher,
     "concurrency@example.invalid",
