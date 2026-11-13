@@ -17,7 +17,8 @@
     "check": "npm test && npm run test:db && npm run lint && npm run typecheck && npm run build",
     "test:browser": "playwright test",
     "release:build": "npm test && npm run test:db && npm run lint -- --max-warnings=0 && npm run typecheck && next build",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/*.mjs\" \"test/*.ts\" \"e2e/*.ts\" playwright.config.ts"
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/*.mjs\" \"test/*.ts\" \"e2e/*.ts\" playwright.config.ts",
+    "test:concurrency": "node scripts/test-concurrency.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",
@@ -41,6 +42,7 @@
     "autoprefixer": "10.4.20",
     "eslint": "9.39.5",
     "eslint-config-next": "16.4.6",
+    "pg": "8.23.1",
     "postcss": "8.5.32",
     "prettier": "3.10.1",
     "tailwindcss": "3.4.17",
