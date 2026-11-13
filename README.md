@@ -83,6 +83,7 @@ En un proyecto nuevo, ejecutar en orden:
 1. `supabase/schema.sql`.
 2. `supabase/migrations/20261112_security_hardening.sql`.
 3. `supabase/migrations/20261113000100_professional_foundation.sql`.
+4. `supabase/migrations/20261113040306_streamline_policy_evaluation.sql`.
 
 En el proyecto existente sólo se aplica la migración que falte. El historial remoto incluye migraciones antiguas que no están completas en esta copia del repositorio: no ejecutar `supabase db push` sin reconciliar ese historial. Ver [operación](./docs/OPERATIONS.md).
 
@@ -98,6 +99,7 @@ Después, asigna grupos a cada docente desde Organización. `seed.sql` es opcion
 
 - `npm test`: reglas de normalización, CSV, validación, cursores y firma QR.
 - `npm run test:db`: base aislada, RLS, integridad, auditoría y restauración local.
+- `npm run test:concurrency`: PostgreSQL 17 local aislado; valida cierre y duplicados simultáneos. En CI se provisiona automáticamente; local requiere DATABASE_TEST_URL apuntando a asistencia_ci en loopback.
 - `npm run test:browser`: smoke tests públicos en escritorio/móvil. El servidor usa el build en puerto 3100.
 - `npm run verify:rls`: verificación remota adicional de sólo lectura; necesita las cuentas indicadas en `.env.example`.
 
@@ -112,3 +114,4 @@ Preview de Vercel es de sólo lectura para APIs. CI utiliza PostgreSQL efímero,
 - Las correcciones hechas mientras se exporta pueden aparecer en páginas posteriores; no es un snapshot transaccional de toda la extracción.
 - El panel muestra la hora de su última actualización; los conteos se refrescan mediante acciones del usuario, sin prometer tiempo real.
 - Los costos y respaldos disponibles dependen del plan contratado. No se ha provisionado un staging cloud ni contratado servicios adicionales.
+

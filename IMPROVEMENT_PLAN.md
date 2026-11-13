@@ -1,6 +1,6 @@
 # Plan de profesionalización
 
-Estado: implementación en curso. La publicación se realiza después de validaciones.
+Estado: implementación realizada y validaciones aprobadas. La publicación se integra mediante PR y CI obligatorio.
 
 1. Integridad: bloqueo compartido de sesión al registrar; cierre con bloqueo incompatible; matrícula de sesión; auditoría transaccional de cambios.
 2. Modelo académico: períodos, grupos, matrículas y asignaciones docentes explícitas. Backfill compatible; historial de padrón por sesión.
@@ -23,3 +23,4 @@ Estado: implementación en curso. La publicación se realiza después de validac
 ## Restricciones y decisiones
 
 No se contratarán servicios de pago ni se enviarán alertas a terceros. El rate limit se implementa en PostgreSQL. Se añaden scripts y CI para pruebas aisladas; las comprobaciones remotas usan fixtures dentro de una transacción que termina en ROLLBACK. Los respaldos deben custodiarse fuera del repositorio; nunca se publican datos escolares.
+

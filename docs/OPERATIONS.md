@@ -17,6 +17,7 @@
 
 ## Comandos
 
+- `npm run test:concurrency`: regresiones y concurrencia en PostgreSQL 17 efímero de CI; sólo acepta asistencia_ci en loopback.
 - `npm run test:db`: pruebas reales en PostgreSQL embebido; no necesita secretos.
 - `npm run test:browser`: humo con servidor de build local en puerto 3100; para repetir localmente instalar Chromium con `npx playwright install chromium`.
 - `npm run verify:rls`: comprobación adicional sólo lectura en Supabase con cuentas de prueba aportadas por el operador. No usar contraseñas personales en CI.
@@ -49,3 +50,4 @@ El proxy genera X-Request-Id en APIs. El cliente de base de datos administrativo
 El QR firmado vence en 15 minutos y se renueva al actualizar el proyector. Las sesiones anteriores mantienen enlaces compatibles. Un QR y un documento no prueban presencia física ni propiedad de la identidad. No se activa geolocalización, biometría ni alta de cuentas estudiantiles sin un proceso institucional definido.
 
 La exportación usa un límite superior de fecha de registro y páginas por cursor; los datos de matrícula se obtienen del padrón de sesión. Las correcciones de asistencia durante una exportación pueden reflejarse en páginas posteriores: no es un snapshot transaccional de toda la extracción.
+

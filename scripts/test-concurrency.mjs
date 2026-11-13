@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 const address = process.env.DATABASE_TEST_URL;
 if (!address)
   throw new Error("DATABASE_TEST_URL is required for the isolated PostgreSQL concurrency suite");
@@ -43,9 +43,11 @@ try {
   await setup.query(
     "GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated,service_role;GRANT SELECT ON public.sessions TO anon;",
   );
-  await setup.query(
-    await readFile("supabase/migrations/20261113000100_professional_foundation.sql", "utf8"),
-  );
+  for (const name of (await readdir("supabase/migrations"))
+    .filter((n) => n > "20261112_security_hardening.sql")
+    .sort()) {
+    await setup.query(await readFile("supabase/migrations/" + name, "utf8"));
+  }
   await setup.query(await readFile("supabase/tests/regression.sql", "utf8"));
   await setup.query("INSERT INTO auth.users(id,email) VALUES($1,$2)", [
     teacher,
