@@ -6,6 +6,7 @@ Aplicación escolar con Next.js 16, React 19, TypeScript, PostgreSQL/Supabase y 
 - [Plan de mejoras](./IMPROVEMENT_PLAN.md)
 - [Operación y recuperación](./docs/OPERATIONS.md)
 - [Pruebas y mediciones](./docs/VALIDATION.md)
+- [Guía de la base de datos y lista oficial del colegio](./docs/GUIA_BASE_DE_DATOS.md)
 
 ## Funcionalidad
 
@@ -84,6 +85,7 @@ En un proyecto nuevo, ejecutar en orden:
 2. `supabase/migrations/20261112_security_hardening.sql`.
 3. `supabase/migrations/20261113000100_professional_foundation.sql`.
 4. `supabase/migrations/20261113040306_streamline_policy_evaluation.sql`.
+5. `supabase/migrations/20261113134055_session_window_and_test_cleanup.sql`.
 
 En el proyecto existente sólo se aplica la migración que falte. El historial remoto incluye migraciones antiguas que no están completas en esta copia del repositorio: no ejecutar `supabase db push` sin reconciliar ese historial. Ver [operación](./docs/OPERATIONS.md).
 

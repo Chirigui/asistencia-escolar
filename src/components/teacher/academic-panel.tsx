@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import type { AcademicData } from "@/types/academic";
+import MaintenancePanel from "./maintenance-panel";
 export default function AcademicPanel({
   data,
   onSaved,
@@ -49,6 +50,14 @@ export default function AcademicPanel({
           Período activo: {data.periods.find((p) => p.active)?.name || "Sin configurar"}. Las
           matrículas de sesiones anteriores conservan su padrón.
         </p>
+        <a
+          href="https://github.com/Chirigui/asistencia-escolar/blob/main/docs/GUIA_BASE_DE_DATOS.md"
+          target="_blank"
+          rel="noreferrer"
+          className="inline-block mt-3 text-sm text-teal-800 underline"
+        >
+          Guía de la base de datos y preparación de la matrícula real
+        </a>
       </div>
       {message && (
         <p role="status" className="p-4 rounded-xl bg-slate-100">
@@ -205,6 +214,7 @@ export default function AcademicPanel({
           Activar período
         </button>
       </form>
+      <MaintenancePanel onCleared={onSaved} />
     </section>
   );
 }

@@ -24,6 +24,8 @@ try {
     console.log("Migration OK:", name);
   }
   const results = await db.exec(await readFile("supabase/tests/regression.sql", "utf8"));
+  const maintenance = await db.exec(await readFile("supabase/tests/maintenance.sql", "utf8"));
+  console.log("Maintenance regression OK:", maintenance.filter((r) => r.rows.length).at(-1)?.rows);
   await db.exec("INSERT INTO public.school_groups(name) VALUES('RESTORE-ONLY')");
   const snapshot = await db.dumpDataDir();
   const restored = new PGlite({ loadDataDir: snapshot });

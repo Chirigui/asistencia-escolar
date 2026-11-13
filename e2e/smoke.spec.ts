@@ -17,7 +17,13 @@ test("attendance requires a QR and protects staff navigation", async ({ page }) 
   await expect(page).toHaveURL(/\/login$/);
 });
 test("anonymous clients cannot list or write school data", async ({ request }) => {
-  for (const path of ["/api/sessions", "/api/academic", "/api/reports", "/api/reports/export"]) {
+  for (const path of [
+    "/api/sessions",
+    "/api/academic",
+    "/api/reports",
+    "/api/reports/export",
+    "/api/maintenance",
+  ]) {
     const response = await request.get(path);
     expect(response.status()).toBe(401);
     expect(response.headers()["cache-control"]).toContain("no-store");
@@ -26,4 +32,8 @@ test("anonymous clients cannot list or write school data", async ({ request }) =
     data: { sessionId: "10000000-0000-4000-8000-000000000001", document: "TEST00001" },
   });
   expect(write.status()).toBe(401);
+  const cleanup = await request.post("/api/maintenance", {
+    data: { action: "clear", confirmation: "BORRAR SESIONES DE PRUEBA" },
+  });
+  expect(cleanup.status()).toBe(401);
 });

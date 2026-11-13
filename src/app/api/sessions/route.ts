@@ -6,6 +6,7 @@ import { generateSessionCode } from "@/lib/session-code";
 import { sessionUrl } from "@/lib/session-url";
 import { decodeCursor, encodeCursor, cursorFilter } from "@/lib/pagination";
 import { normalizeGroupText } from "@/lib/utils";
+import { sessionWindow } from "@/lib/session-window";
 import {
   cleanString,
   getAppBaseUrl,
@@ -105,9 +106,10 @@ export async function POST(request: Request) {
 
   const subject = cleanString(body.subject, 120);
   const groupName = normalizeGroupText(cleanString(body.groupName, 20));
-  const date = cleanString(body.date, 10);
-  const startTime = normalizeTimeString(body.startTime);
-  const endTime = normalizeTimeString(body.endTime);
+  const window = body.startNow === true ? sessionWindow() : null;
+  const date = window?.date || cleanString(body.date, 10);
+  const startTime = window?.startTime || normalizeTimeString(body.startTime);
+  const endTime = window?.endTime || normalizeTimeString(body.endTime);
 
   if (!subject || !groupName || !date || !startTime || !endTime) {
     return NextResponse.json(
@@ -123,7 +125,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (endTime <= startTime) {
+  if (!window && endTime <= startTime) {
     return NextResponse.json(
       { success: false, message: "La hora de fin debe ser posterior a la hora de inicio." },
       { status: 400 },
@@ -149,6 +151,12 @@ export async function POST(request: Request) {
           end_time: endTime,
           status: "ABIERTA",
           qr_token_required: true,
+          ...(window
+            ? {
+                registration_opens_at: window.registration_opens_at,
+                registration_closes_at: window.registration_closes_at,
+              }
+            : {}),
         })
         .select()
         .single();

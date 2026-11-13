@@ -7,7 +7,7 @@ export async function GET() {
   const auth = await requireStaff();
   if (!auth.ok) return auth.response;
   const { supabase, role, email } = auth.ctx;
-  const [periods, assignments, teachers] = await Promise.all([
+  const [periods, assignments, teachers, groups] = await Promise.all([
     supabase
       .from("academic_periods")
       .select("id,name,starts_on,ends_on,active")
@@ -19,8 +19,9 @@ export async function GET() {
     role === "admin"
       ? supabase.from("profiles").select("id,full_name,email").order("full_name")
       : Promise.resolve({ data: [], error: null }),
+    supabase.from("school_groups").select("id,name").order("name"),
   ]);
-  if (periods.error || assignments.error || teachers.error)
+  if (periods.error || assignments.error || teachers.error || groups.error)
     return NextResponse.json(
       { success: false, message: "No fue posible cargar la organización académica." },
       { status: 500 },
@@ -32,6 +33,7 @@ export async function GET() {
     periods: periods.data,
     assignments: assignments.data,
     teachers: teachers.data,
+    groups: groups.data,
   });
 }
 export async function POST(request: Request) {
