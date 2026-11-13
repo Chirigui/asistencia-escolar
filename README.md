@@ -2,7 +2,7 @@
 
 Aplicación escolar con Next.js 16, React 19, TypeScript, PostgreSQL/Supabase y Vercel. Incluye registro QR, sesiones docentes, asistencia manual, reportes, importación de estudiantes y organización académica.
 
-- [Aplicación de producción](https://asistencia-escolar-julian-fc62.vercel.app)
+- [Aplicación de producción](https://asistencia-escolar-taupe.vercel.app)
 - [Plan de mejoras](./IMPROVEMENT_PLAN.md)
 - [Operación y recuperación](./docs/OPERATIONS.md)
 - [Pruebas y mediciones](./docs/VALIDATION.md)

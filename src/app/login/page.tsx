@@ -114,6 +114,7 @@ export default function LoginPage() {
           {errorMsg && (
             <div
               role="alert"
+              aria-label="Error de acceso"
               aria-live="polite"
               className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-700 text-xs leading-relaxed"
             >

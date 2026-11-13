@@ -3,9 +3,10 @@ import { createClient } from "@/lib/supabase/server";
 import { checkDistributedLimit } from "@/lib/distributed-limit";
 import { getClientIp, readJsonObject } from "@/lib/validation";
 import { logError } from "@/lib/observability";
+import { isSameOriginRequest } from "@/lib/request-origin";
 
 export async function POST(request: Request) {
-  if (request.headers.get("origin") !== new URL(request.url).origin)
+  if (!isSameOriginRequest(request))
     return NextResponse.json({ success: false, message: "Origen no permitido." }, { status: 403 });
   const body = await readJsonObject(request);
   const email = typeof body?.email === "string" ? body.email.trim() : "";

@@ -12,7 +12,9 @@ test("login commits cookies, verifies teacher role, and logout protects direct n
   await page.getByLabel("Correo Institucional").fill("teacher@example.invalid");
   await page.getByLabel("Contraseña", { exact: true }).fill("wrong-fixture-password");
   await page.getByRole("button", { name: "Iniciar Sesión" }).click();
-  await expect(page.getByRole("alert")).toContainText("Verifica el correo");
+  await expect(page.getByRole("alert", { name: "Error de acceso" })).toContainText(
+    "Verifica el correo",
+  );
   await page.getByLabel("Contraseña", { exact: true }).fill("ci-fixture-password");
   await page.getByRole("button", { name: "Iniciar Sesión" }).click();
   await expect(page).toHaveURL(/\/profesor$/);
