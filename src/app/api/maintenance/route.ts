@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { readJsonObject } from "@/lib/validation";
 import { logError } from "@/lib/observability";
+import { isSameOriginRequest } from "@/lib/request-origin";
 
 export async function GET() {
   const auth = await requireAdmin();
@@ -28,7 +29,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
-  if (request.headers.get("origin") !== new URL(request.url).origin)
+  if (!isSameOriginRequest(request))
     return NextResponse.json({ success: false, message: "Origen no permitido." }, { status: 403 });
   const body = await readJsonObject(request);
   if (body?.action === "cache")

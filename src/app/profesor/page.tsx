@@ -36,6 +36,13 @@ import type { SessionListItem, SessionDetail, ReportRow, ImportPreview } from "@
 
 export default function TeacherPanelPage() {
   const router = useRouter();
+  useEffect(() => {
+    const revalidate = (event: PageTransitionEvent) => {
+      if (event.persisted) window.location.reload();
+    };
+    window.addEventListener("pageshow", revalidate);
+    return () => window.removeEventListener("pageshow", revalidate);
+  }, []);
   const [activeTab, setActiveTab] = useState<"clases" | "reportes" | "importar" | "academico">(
     "clases",
   );
@@ -193,10 +200,13 @@ export default function TeacherPanelPage() {
   }, [loadSessions, loadAcademic]);
 
   const handleLogout = async () => {
-    const { createClient } = await import("@/lib/supabase/client");
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
+    try {
+      const response = await fetch("/api/auth/logout", { method: "POST" });
+      if (!response.ok) throw new Error("No fue posible cerrar la sesión.");
+      window.location.replace("/login");
+    } catch {
+      alert("No fue posible cerrar la sesión. Intenta de nuevo.");
+    }
   };
 
   const handleCreateSession = async (e: React.FormEvent) => {

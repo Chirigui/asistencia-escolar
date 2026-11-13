@@ -2,7 +2,7 @@
 
 Aplicación escolar con Next.js 16, React 19, TypeScript, PostgreSQL/Supabase y Vercel. Incluye registro QR, sesiones docentes, asistencia manual, reportes, importación de estudiantes y organización académica.
 
-- [Aplicación de producción](https://asistencia-escolar-julian-fc62.vercel.app)
+- [Aplicación de producción](https://asistencia-escolar-taupe.vercel.app)
 - [Plan de mejoras](./IMPROVEMENT_PLAN.md)
 - [Operación y recuperación](./docs/OPERATIONS.md)
 - [Pruebas y mediciones](./docs/VALIDATION.md)
@@ -86,6 +86,7 @@ En un proyecto nuevo, ejecutar en orden:
 3. `supabase/migrations/20261113000100_professional_foundation.sql`.
 4. `supabase/migrations/20261113040306_streamline_policy_evaluation.sql`.
 5. `supabase/migrations/20261113134055_session_window_and_test_cleanup.sql`.
+6. `supabase/migrations/20261113141421_fix_scoped_test_cleanup.sql`.
 
 En el proyecto existente sólo se aplica la migración que falte. El historial remoto incluye migraciones antiguas que no están completas en esta copia del repositorio: no ejecutar `supabase db push` sin reconciliar ese historial. Ver [operación](./docs/OPERATIONS.md).
 

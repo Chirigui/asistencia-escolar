@@ -41,6 +41,8 @@ const nextConfig = {
   async headers() {
     return [
       { source: "/api/:path*", headers: [{ key: "Cache-Control", value: "private, no-store" }] },
+      { source: "/profesor/:path*", headers: [{ key: "Cache-Control", value: "private, no-store" }] },
+      { source: "/login", headers: [{ key: "Cache-Control", value: "private, no-store" }] },
       {
         source: "/:path*",
         headers: securityHeaders,

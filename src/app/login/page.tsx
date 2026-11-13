@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { GraduationCap, Lock, Mail, ArrowRight, ShieldCheck } from "lucide-react";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -19,26 +17,17 @@ export default function LoginPage() {
     setErrorMsg("");
 
     try {
-      const { createClient } = await import("@/lib/supabase/client");
-      const supabase = createClient();
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password: password,
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
       });
-
-      if (error) {
-        setErrorMsg(
-          error.message === "Invalid login credentials"
-            ? "Credenciales incorrectas. Verifica tu correo y contraseña."
-            : error.message,
-        );
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        setErrorMsg(data.message || "No fue posible iniciar sesión.");
         return;
       }
-
-      if (data.session) {
-        router.push("/profesor");
-        router.refresh();
-      }
+      window.location.replace("/profesor");
     } catch {
       setErrorMsg("Ocurrió un error inesperado al iniciar sesión.");
     } finally {
@@ -125,6 +114,7 @@ export default function LoginPage() {
           {errorMsg && (
             <div
               role="alert"
+              aria-label="Error de acceso"
               aria-live="polite"
               className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-700 text-xs leading-relaxed"
             >
