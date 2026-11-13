@@ -27,4 +27,3 @@ El panel reduce aproximadamente 27,9 % el JavaScript inicial gzip tras separar m
 - Copia local de datos de aplicación cifrada con DPAPI y verificada. No incluye Auth ni equivale a un respaldo completo del servicio.
 - La protección de contraseñas filtradas sigue desactivada: requiere Pro o superior. No se han contratado servicios. Referencia: https://supabase.com/docs/guides/auth/password-security
 - Los avisos de índices sin uso no justifican eliminarlos en una base con sólo 15 estudiantes; se revisarán con tráfico representativo.
-

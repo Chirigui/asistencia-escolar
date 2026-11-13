@@ -50,4 +50,3 @@ El proxy genera X-Request-Id en APIs. El cliente de base de datos administrativo
 El QR firmado vence en 15 minutos y se renueva al actualizar el proyector. Las sesiones anteriores mantienen enlaces compatibles. Un QR y un documento no prueban presencia física ni propiedad de la identidad. No se activa geolocalización, biometría ni alta de cuentas estudiantiles sin un proceso institucional definido.
 
 La exportación usa un límite superior de fecha de registro y páginas por cursor; los datos de matrícula se obtienen del padrón de sesión. Las correcciones de asistencia durante una exportación pueden reflejarse en páginas posteriores: no es un snapshot transaccional de toda la extracción.
-
