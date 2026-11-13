@@ -2,6 +2,14 @@
 
 Plataforma de software completa, moderna y segura para el control y registro de asistencia escolar en tiempo real mediante códigos QR proyectados en aula. Diseñada para instituciones educativas con padrones de 800 a 1.000+ estudiantes.
 
+### Estado de producción
+
+- **Aplicación:** [asistencia-escolar-julian-fc62.vercel.app](https://asistencia-escolar-julian-fc62.vercel.app) — despliegue de producción listo en Vercel.
+- **Código:** la rama `main` de [Chirigui/asistencia-escolar](https://github.com/Chirigui/asistencia-escolar) activa los despliegues automáticos.
+- **Base de datos:** la migración `20261112_security_hardening.sql` ya está aplicada al proyecto Supabase de producción.
+- **Última publicación:** commit `fdc612f` (12 de noviembre de 2026). El despliegue anterior detectó un middleware obsoleto; se eliminó para dejar sólo el Proxy compatible con Next.js 16.
+- **Verificación del release:** 38 pruebas, ESLint y compilación de producción completados correctamente.
+
 ---
 
 ## 1. Arquitectura Técnica
@@ -74,15 +82,16 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 ### Paso 1: Configurar Proyecto en Supabase
 1. Ingresa a [https://supabase.com](https://supabase.com) y crea un nuevo proyecto (selecciona la región más cercana a tu país, ej. `sa-east-1` o `us-east-1`).
 2. Abre la sección **SQL Editor** en la consola de Supabase.
-3. Copia y ejecuta todo el contenido de [`supabase/schema.sql`](./supabase/schema.sql). Esto creará las tablas, índices, restricciones únicas de concurrencia y las políticas de seguridad (RLS).
-4. Opcionalmente, ejecuta [`supabase/seed.sql`](./supabase/seed.sql) para cargar estudiantes de prueba de los grados 10 y 11.
-5. En **Authentication > Users**, haz clic en **Add user** -> **Create user** para crear el usuario docente inicial (ejemplo: `profesor@colegio.edu.co` con su contraseña).
+3. Copia y ejecuta todo el contenido de [`supabase/schema.sql`](./supabase/schema.sql). Esto crea las tablas base, índices y restricciones.
+4. Ejecuta [`supabase/migrations/20261112_security_hardening.sql`](./supabase/migrations/20261112_security_hardening.sql) después del esquema. Refuerza las políticas RLS, el aislamiento por docente/grupo, la validación del registro QR y los permisos del RPC. Esta migración también se requiere en proyectos nuevos.
+5. Opcionalmente, ejecuta [`supabase/seed.sql`](./supabase/seed.sql) para cargar estudiantes de prueba de los grados 10 y 11.
+6. En **Authentication > Users**, haz clic en **Add user** -> **Create user** para crear el usuario docente inicial (ejemplo: `profesor@colegio.edu.co` con su contraseña).
    - **Importante:** desactiva el registro público en **Authentication > Providers > Email** (o en la configuración de signups). La aplicación está pensada para que sólo un administrador cree cuentas.
    - El trigger crea el perfil con rol `teacher`. Para un administrador, actualiza el rol manualmente:
      ```sql
      UPDATE public.profiles SET role = 'admin' WHERE email = 'admin@colegio.edu.co';
      ```
-6. Ve a **Project Settings > API** y copia:
+7. Ve a **Project Settings > API** y copia:
    - `Project URL`
    - `anon public key`
    - `service_role secret key` (clave secreta de servidor).
@@ -117,15 +126,14 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 
 ## 4. Guía de Despliegue en Vercel
 
-1. Sube el repositorio a **GitHub**, **GitLab** o **Bitbucket**.
-2. Ingresa a tu cuenta en [https://vercel.com](https://vercel.com) y selecciona **Add New... > Project**.
-3. Importa el repositorio del proyecto.
-4. En la sección **Environment Variables**, añade exactamente las 4 variables de entorno:
+1. Conecta el repositorio `Chirigui/asistencia-escolar` a Vercel. El proyecto de producción existente se llama `asistencia-escolar`.
+2. Configura estas variables de entorno para Production, Preview y Development según corresponda:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `NEXT_PUBLIC_APP_URL`: La URL definitiva de Vercel (ejemplo: `https://asistencia-colegio.vercel.app`).
-5. Haz clic en **Deploy**. Vercel compilará la aplicación y la dejará disponible en segundos con CDN global y certificados SSL automáticos.
+3. La rama `main` publica automáticamente a producción. Las demás ramas pueden generar despliegues Preview.
+4. La URL de producción actual es [https://asistencia-escolar-julian-fc62.vercel.app](https://asistencia-escolar-julian-fc62.vercel.app).
 
 ---
 
@@ -136,10 +144,10 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 - El registro QR valida estado, fecha, ventana horaria, grupo, estudiante activo y duplicados dentro de una función transaccional. La función RPC sólo es ejecutable por `service_role`.
 - Los endpoints públicos tienen un rate limit en memoria por instancia. En Vercel esto **no es un límite distribuido**; para producción se recomienda añadir Vercel WAF o Upstash Ratelimit.
 - La zona horaria de la ventana de registro está fijada en `America/Bogota` dentro de `schema.sql`. Si el colegio opera en otra zona, cámbiala en la función `register_student_attendance`.
-- **Migración en un proyecto existente:** haz copia de seguridad y ejecuta [`supabase/migrations/20261112_security_hardening.sql`](./supabase/migrations/20261112_security_hardening.sql) en el SQL Editor. En un proyecto nuevo basta con `schema.sql`. No ejecutes migraciones contra una base remota sin autorización.
+- **Migración aplicada en producción:** `20261112_security_hardening.sql` se aplicó al proyecto Supabase conectado el 12 de noviembre de 2026. En otros proyectos, ejecuta primero `schema.sql` y luego la migración de seguridad desde el SQL Editor; revisa el destino antes de aplicarla.
 - **Cabeceras y CSP:** `next.config.js` aplica `Content-Security-Policy`, `X-Frame-Options: DENY`, `nosniff`, HSTS, `Referrer-Policy` y `Permissions-Policy`. La CSP permite `'unsafe-inline'` para los scripts de arranque de Next.js; una política estricta con nonce requeriría render dinámico en todas las páginas. Si usas un dominio propio de Supabase, agrégalo a `connect-src`.
 - **Verificación de RLS:** `npm run verify:rls` comprueba contra un proyecto real que `anon` no lee sesiones/incidencias, que dos docentes no ven sesiones ajenas, que un docente no ejecuta el RPC y que un admin ve todo. Requiere las variables `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `RLS_TEACHER_A_EMAIL/PASSWORD`, `RLS_TEACHER_B_EMAIL/PASSWORD` y `RLS_ADMIN_EMAIL/PASSWORD`. Sólo ejecuta lecturas.
-- **Versiones:** Next.js 16, React 19, ESLint 9 (flat config) y Node.js `>=22.6.0`. `npm run lint` usa `eslint .` porque `next lint` fue eliminado en Next.js 16.
+- **Versiones:** Next.js 16, React 19, ESLint 10 (flat config) y Node.js `>=22.6.0`. `npm run lint` usa `eslint .` porque `next lint` fue eliminado en Next.js 16.
 - **Archivos legacy:** se eliminaron `Codigo.js`, `Index.html` y `PanelProfesor.html` de la versión Google Apps Script, que contenían una contraseña por defecto antigua. Si esa contraseña se usó alguna vez en producción, rótala.
 
 ---
@@ -168,18 +176,11 @@ Plataforma de software completa, moderna y segura para el control y registro de 
 
 ---
 
-## 7. Mejoras Implementadas, Límites y Análisis de Costos
+## 7. Estado y límites conocidos
 
-### Mejoras frente a la versión de Google Apps Script:
-- **Latencia y Concurrencia:** Eliminado el cuello de botella de Google Sheets (límites de 30 solicitudes concurrentes y demoras de 3-8 segundos en Apps Script). Supabase PostgreSQL responde transacciones en < 50 ms.
-- **Integridad y Cero Duplicados:** Restricción de base de datos `UNIQUE (session_id, student_id)` y procedimiento almacenado atómico con `ON CONFLICT DO NOTHING`. Imposible registrar duplicados incluso con cientos de clics simultáneos.
-- **Seguridad Real (RLS):** Las claves maestras nunca bajan al navegador del estudiante. Toda operación administrativa exige sesión autenticada con JWT criptográfico.
-- **Códigos QR Nativos:** Generados directamente en el servidor sin intermediarios como QuickChart, eliminando puntos de fallo externos y garantizando privacidad institucional.
+- El despliegue actual de producción en Vercel está listo y sirve la aplicación por HTTPS.
+- El registro QR valida sesión, fecha, horario, grupo, estado del estudiante y duplicados en la base de datos. La restricción única y el RPC evitan duplicados bajo concurrencia.
+- El límite de solicitudes de endpoints públicos se mantiene en memoria por instancia. No es distribuido; para un límite consistente entre instancias, configura Vercel WAF o un servicio como Upstash.
+- El panel docente refresca los conteos manualmente; no tiene actualizaciones WebSocket en tiempo real.
+- Los precios y cuotas dependen del plan vigente de cada proveedor. Consulta las páginas de [Vercel](https://vercel.com/pricing) y [Supabase](https://supabase.com/pricing) antes de estimar costos de producción.
 
-### Análisis de Costos y Cuotas para 800 - 1.000 Estudiantes:
-- **Nivel Inicial (Gratuito):**
-  - **Vercel Hobby:** Soporta holgadamente el tráfico del colegio (100 GB de ancho de banda y millones de invocaciones serverless).
-  - **Supabase Free Tier:** Ofrece 500 MB de base de datos relacional y 50.000 usuarios activos mensuales. Para 1.000 estudiantes y registros diarios durante meses, el consumo de datos es de apenas ~15-20 MB.
-- **Consideraciones para Producción Formal:**
-  - En el plan gratuito de Supabase, los proyectos sin actividad durante una semana pueden pausarse temporalmente.
-  - **Recomendación Institucional:** Para un colegio en producción oficial continuo, se recomienda activar el plan **Supabase Pro (\$25 USD/mes)**, el cual garantiza cero pausas por inactividad, copias de seguridad automáticas diarias (Point-in-Time Recovery) y soporte técnico para garantizar disponibilidad del 99.9% durante todo el calendario escolar.
