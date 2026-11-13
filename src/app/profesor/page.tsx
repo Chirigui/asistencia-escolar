@@ -2,7 +2,24 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import dynamic from "next/dynamic";
+import type { AcademicData } from "@/types/academic";
+const ReportsPanel = dynamic(() => import("@/components/teacher/reports-panel"), {
+  loading: () => (
+    <p role="status" className="p-8">
+      Cargando reportes…
+    </p>
+  ),
+});
+const ImportPanel = dynamic(() => import("@/components/teacher/import-panel"), {
+  loading: () => (
+    <p role="status" className="p-8">
+      Cargando importador…
+    </p>
+  ),
+});
+const SessionDialog = dynamic(() => import("@/components/teacher/session-dialog"));
+const AcademicPanel = dynamic(() => import("@/components/teacher/academic-panel"));
 import {
   GraduationCap,
   PlusCircle,
@@ -10,120 +27,32 @@ import {
   Users,
   LogOut,
   X,
-  CheckCircle,
-  Download,
   AlertCircle,
   RefreshCw,
 } from "lucide-react";
 
-interface SessionListItem {
-  id: string;
-  code: string;
-  subject: string;
-  groupName: string;
-  date: string;
-  startTime: string;
-  endTime: string;
-  status: string;
-  presents: number;
-  total: number;
-}
-
-interface SessionDetailSession {
-  id: string;
-  code: string;
-  subject: string;
-  group_name: string;
-  date: string;
-  start_time: string;
-  end_time: string;
-  status: string;
-}
-
-interface PresentRow {
-  attendanceId: string;
-  registeredAt: string;
-  status: string;
-  method: string;
-  notes: string | null;
-  document: string;
-  fullName: string;
-  grade: string;
-  groupName: string;
-}
-
-interface AbsentRow {
-  id: string;
-  document: string;
-  fullName: string;
-  grade: string;
-  groupName: string;
-}
-
-interface SessionDetail {
-  session: SessionDetailSession;
-  sessionUrl: string;
-  qrDataUrl: string;
-  stats: {
-    total: number;
-    presentsCount: number;
-    absentsCount: number;
-  };
-  presents: PresentRow[];
-  absents: AbsentRow[];
-}
-
-interface ReportRow {
-  id: string;
-  sessionCode: string;
-  subject: string;
-  sessionGroup: string;
-  date: string;
-  registeredAt: string;
-  document: string;
-  studentName: string;
-  grade: string;
-  group: string;
-  status: string;
-  method: string;
-}
-
-interface ImportPreviewRow {
-  row: number;
-  document: string;
-  fullName: string;
-  grade: string;
-  groupName: string;
-  status: string;
-  valid: boolean;
-  errors: string[];
-}
-
-interface ImportPreview {
-  success: boolean;
-  dryRun: boolean;
-  summary: {
-    total: number;
-    valid: number;
-    duplicates: number;
-    invalid: number;
-    inserted: number;
-  };
-  preview: ImportPreviewRow[];
-  message?: string;
-}
+import type { SessionListItem, SessionDetail, ReportRow, ImportPreview } from "@/types/teacher";
 
 function todayInputValue(): string {
-  const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 export default function TeacherPanelPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"clases" | "reportes" | "importar">("clases");
+  const [activeTab, setActiveTab] = useState<"clases" | "reportes" | "importar" | "academico">(
+    "clases",
+  );
   const [userProfile, setUserProfile] = useState<{ email?: string; role?: string } | null>(null);
 
+  const [academic, setAcademic] = useState<AcademicData | null>(null);
+  const [nextSessionCursor, setNextSessionCursor] = useState<string | null>(null);
+  const [nextReportCursor, setNextReportCursor] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState("");
   // Estados de sesiones
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
@@ -133,7 +62,7 @@ export default function TeacherPanelPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState({
     subject: "",
-    groupName: "10A",
+    groupName: "",
     date: todayInputValue(),
     startTime: "07:00",
     endTime: "08:30",
@@ -155,7 +84,6 @@ export default function TeacherPanelPage() {
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [loadingReports, setLoadingReports] = useState(false);
   const [reportsError, setReportsError] = useState("");
-  const [reportsTruncated, setReportsTruncated] = useState(false);
   const [reportFilters, setReportFilters] = useState({
     dateFrom: "",
     dateTo: "",
@@ -171,14 +99,17 @@ export default function TeacherPanelPage() {
 
   // Keep keyboard focus inside the active dialog and restore its trigger.
   useEffect(() => {
-    if (!showCreateModal && !selectedSessionId) return;
+    if (!showCreateModal) return;
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
     const previous = document.activeElement as HTMLElement | null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(
-      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]'
-    ) ?? []).filter(element => element.getClientRects().length > 0);
+    const focusable = () =>
+      Array.from(
+        dialog?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
+        ) ?? [],
+      ).filter((element) => element.getClientRects().length > 0);
     focusable()[0]?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -189,11 +120,16 @@ export default function TeacherPanelPage() {
       const elements = focusable();
       const first = elements[0];
       const last = elements[elements.length - 1];
-      if (!first) { event.preventDefault(); return; }
+      if (!first) {
+        event.preventDefault();
+        return;
+      }
       if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault(); last?.focus();
+        event.preventDefault();
+        last?.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault(); first.focus();
+        event.preventDefault();
+        first.focus();
       }
     };
     document.addEventListener("keydown", onKeyDown);
@@ -202,53 +138,71 @@ export default function TeacherPanelPage() {
       document.body.style.overflow = previousOverflow;
       previous?.focus();
     };
-  }, [showCreateModal, selectedSessionId]);
+  }, [showCreateModal]);
 
-  const loadSessions = useCallback(async () => {
+  const loadSessions = useCallback(
+    async (cursor: string | null = null) => {
+      try {
+        setLoadingSessions(true);
+        setSessionsError("");
+
+        const res = await fetch(
+          "/api/sessions" + (cursor ? "?cursor=" + encodeURIComponent(cursor) : ""),
+          { cache: "no-store" },
+        );
+        if (res.status === 401) {
+          router.push("/login");
+          return;
+        }
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          setSessionsError(data.message || "No fue posible cargar las sesiones.");
+          return;
+        }
+
+        setSessions((previous) =>
+          cursor ? [...previous, ...(data.sessions || [])] : data.sessions || [],
+        );
+        setNextSessionCursor(data.nextCursor || null);
+        setLastUpdated(
+          new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }),
+        );
+      } catch (err) {
+        void err;
+        setSessionsError("Error de conexión al cargar las sesiones.");
+      } finally {
+        setLoadingSessions(false);
+      }
+    },
+    [router],
+  );
+
+  const loadAcademic = useCallback(async () => {
     try {
-      setLoadingSessions(true);
-      setSessionsError("");
-
-      const res = await fetch("/api/sessions");
-      if (res.status === 401) {
+      const response = await fetch("/api/academic", { cache: "no-store" });
+      if (response.status === 401) {
         router.push("/login");
         return;
       }
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) {
-        setSessionsError(data.message || "No fue posible cargar las sesiones.");
-        return;
-      }
-
-      setSessions(data.sessions || []);
-    } catch (err) {
-      console.error(err);
-      setSessionsError("Error de conexión al cargar las sesiones.");
-    } finally {
-      setLoadingSessions(false);
+      const data = await response.json();
+      if (data.success) {
+        setAcademic(data);
+        setUserProfile({ email: data.email, role: data.role });
+      } else setSessionsError(data.message || "No fue posible cargar los grupos asignados.");
+    } catch {
+      setSessionsError("No fue posible cargar la organización académica.");
     }
   }, [router]);
-
-  // Carga inicial y verificación de Auth
   useEffect(() => {
-    const checkAuthAndLoad = async () => {
-      void loadSessions();
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (!user) {
-        router.push("/login");
-        return;
-      }
-
-      setUserProfile({ email: user.email });
+    const load = async () => {
+      await Promise.all([loadSessions(), loadAcademic()]);
     };
-
-    checkAuthAndLoad();
-  }, [router, loadSessions]);
+    void load();
+  }, [loadSessions, loadAcademic]);
 
   const handleLogout = async () => {
+    const { createClient } = await import("@/lib/supabase/client");
     const supabase = createClient();
     await supabase.auth.signOut();
     router.push("/login");
@@ -299,7 +253,7 @@ export default function TeacherPanelPage() {
 
       setSessionDetail(data);
     } catch (err) {
-      console.error(err);
+      void err;
       setDetailError("Error de conexión al cargar la sesión.");
     } finally {
       setLoadingDetail(false);
@@ -312,9 +266,7 @@ export default function TeacherPanelPage() {
     const nextStatus = currentStatus === "ABIERTA" ? "CERRADA" : "ABIERTA";
     if (
       nextStatus === "CERRADA" &&
-      !window.confirm(
-        "¿Cerrar la toma de asistencia? Los estudiantes ya no podrán registrarse."
-      )
+      !window.confirm("¿Cerrar la toma de asistencia? Los estudiantes ya no podrán registrarse.")
     ) {
       return;
     }
@@ -336,7 +288,7 @@ export default function TeacherPanelPage() {
       await openSessionDetail(selectedSessionId);
       await loadSessions();
     } catch (err) {
-      console.error(err);
+      void err;
       alert("Error de conexión al actualizar la sesión.");
     } finally {
       setStatusUpdating(false);
@@ -370,20 +322,20 @@ export default function TeacherPanelPage() {
       await openSessionDetail(selectedSessionId);
       await loadSessions();
     } catch (err) {
-      console.error(err);
+      void err;
       alert("Error de conexión al registrar asistencia manual.");
     } finally {
       setManualSubmitting(false);
     }
   };
 
-  const loadReports = async () => {
+  const loadReports = async (cursor: string | null = null) => {
     setLoadingReports(true);
     setReportsError("");
-    setReportsTruncated(false);
 
     try {
       const params = new URLSearchParams();
+      if (cursor) params.set("cursor", cursor);
       if (reportFilters.dateFrom) params.append("dateFrom", reportFilters.dateFrom);
       if (reportFilters.dateTo) params.append("dateTo", reportFilters.dateTo);
       if (reportFilters.groupName) params.append("groupName", reportFilters.groupName);
@@ -402,10 +354,10 @@ export default function TeacherPanelPage() {
         return;
       }
 
-      setReports(data.rows || []);
-      setReportsTruncated(Boolean(data.truncated));
+      setReports((previous) => (cursor ? [...previous, ...(data.rows || [])] : data.rows || []));
+      setNextReportCursor(data.nextCursor || null);
     } catch (err) {
-      console.error(err);
+      void err;
       setReports([]);
       setReportsError("Error de conexión al generar el reporte.");
     } finally {
@@ -414,46 +366,25 @@ export default function TeacherPanelPage() {
   };
 
   const exportReportsCsv = async () => {
-    if (reports.length === 0) return;
-
+    setReportsError("");
     try {
-    const headers = [
-      "Sesion",
-      "Fecha",
-      "Hora",
-      "Documento",
-      "Estudiante",
-      "Grado",
-      "Grupo",
-      "Materia",
-      "Metodo",
-      "Estado",
-    ];
-    const rows = reports.map((r) => [
-      r.sessionCode,
-      r.date,
-      new Date(r.registeredAt).toLocaleTimeString("es-CO", { hour12: false }),
-      r.document,
-      r.studentName,
-      r.grade,
-      r.group,
-      r.subject,
-      r.method,
-      r.status,
-    ]);
-    const { buildCsv } = await import("@/lib/csv");
-    const csvContent = buildCsv(headers, rows);
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `reporte_asistencia_${todayInputValue()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+      const response = await fetch(
+        "/api/reports/export?" + new URLSearchParams(reportFilters).toString(),
+      );
+      if (!response.ok) {
+        const data = await response.json();
+        setReportsError(data.message || "No fue posible exportar.");
+        return;
+      }
+      const blob = await response.blob(),
+        url = URL.createObjectURL(blob),
+        link = document.createElement("a");
+      link.href = url;
+      link.download = "asistencia.csv";
+      link.click();
+      URL.revokeObjectURL(url);
     } catch {
-      setReportsError("No fue posible preparar la descarga. Intenta de nuevo.");
+      setReportsError("La descarga fue interrumpida. Intenta de nuevo.");
     }
   };
 
@@ -508,12 +439,12 @@ export default function TeacherPanelPage() {
       setImportPreview(data);
       if (!dryRun) {
         setImportSuccessMsg(
-          `¡Éxito! Se importaron ${data.summary.inserted} estudiantes correctamente.`
+          `¡Éxito! Se importaron ${data.summary.inserted} estudiantes correctamente.`,
         );
         setImportCsvText("");
       }
     } catch (err) {
-      console.error(err);
+      void err;
       alert("Error de conexión durante la importación.");
     } finally {
       setImporting(false);
@@ -530,7 +461,9 @@ export default function TeacherPanelPage() {
           </div>
           <div>
             <h1 className="text-sm font-bold leading-tight">Asistencia · Espacio docente</h1>
-            <p className="text-[11px] text-slate-600 font-mono">{userProfile?.email || "Cargando..."}</p>
+            <p className="text-[11px] text-slate-600 font-mono">
+              {userProfile?.email || "Cargando..."}
+            </p>
           </div>
         </div>
 
@@ -540,7 +473,9 @@ export default function TeacherPanelPage() {
               aria-pressed={activeTab === "clases"}
               onClick={() => setActiveTab("clases")}
               className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "clases" ? "bg-teal-700 text-white  shadow" : "text-slate-600 hover:text-slate-900"
+                activeTab === "clases"
+                  ? "bg-teal-700 text-white  shadow"
+                  : "text-slate-600 hover:text-slate-900"
               }`}
             >
               Clases y QR
@@ -548,22 +483,37 @@ export default function TeacherPanelPage() {
             <button
               onClick={() => {
                 setActiveTab("reportes");
-                loadReports();
+                void loadReports();
               }}
               className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "reportes" ? "bg-teal-700 text-white  shadow" : "text-slate-600 hover:text-slate-900"
+                activeTab === "reportes"
+                  ? "bg-teal-700 text-white  shadow"
+                  : "text-slate-600 hover:text-slate-900"
               }`}
             >
               Reportes
             </button>
-            <button
-              onClick={() => setActiveTab("importar")}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "importar" ? "bg-teal-700 text-white  shadow" : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Importar Matrícula
-            </button>
+            {userProfile?.role === "admin" && (
+              <button
+                onClick={() => setActiveTab("importar")}
+                className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+                  activeTab === "importar"
+                    ? "bg-teal-700 text-white  shadow"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Importar Matrícula
+              </button>
+            )}
+            {userProfile?.role === "admin" && (
+              <button
+                onClick={() => setActiveTab("academico")}
+                className="px-3 py-1.5 rounded-lg"
+                aria-pressed={activeTab === "academico"}
+              >
+                Organización
+              </button>
+            )}
           </nav>
 
           <button
@@ -575,6 +525,31 @@ export default function TeacherPanelPage() {
           </button>
         </div>
       </header>
+      <section
+        className="max-w-7xl w-full mx-auto px-4 sm:px-8 pt-8"
+        aria-label="Resumen de sesiones cargadas"
+      >
+        <p className="eyebrow">TU JORNADA ESCOLAR</p>
+        <p className="text-xs text-slate-600 mt-2" role="status">
+          {lastUpdated
+            ? `Actualizado a las ${lastUpdated} · resumen de las sesiones cargadas`
+            : "Cargando sesiones…"}
+        </p>
+        <div className="grid grid-cols-3 gap-3 mt-4">
+          <div className="stat-card">
+            <span>Sesiones cargadas</span>
+            <strong>{sessions.length}</strong>
+          </div>
+          <div className="stat-card">
+            <span>Abiertas</span>
+            <strong>{sessions.filter((s) => s.status === "ABIERTA").length}</strong>
+          </div>
+          <div className="stat-card">
+            <span>Registros</span>
+            <strong>{sessions.reduce((sum, s) => sum + s.presents, 0)}</strong>
+          </div>
+        </div>
+      </section>
 
       {/* Contenido según pestaña */}
       <main className="flex-1 p-4 sm:p-8 max-w-7xl w-full mx-auto">
@@ -585,13 +560,14 @@ export default function TeacherPanelPage() {
               <div>
                 <h2 className="text-3xl font-bold tracking-tight">Tus clases, de un vistazo</h2>
                 <p className="text-xs text-slate-600">
-                  Crea una sesión, proyecta su código QR gigante y revisa los registros de asistencia.
+                  Crea una sesión, proyecta su código QR gigante y revisa los registros de
+                  asistencia.
                 </p>
               </div>
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={loadSessions}
+                  onClick={() => loadSessions()}
                   title="Actualizar sesiones"
                   aria-label="Actualizar sesiones"
                   className="p-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 transition-colors text-slate-600"
@@ -619,15 +595,14 @@ export default function TeacherPanelPage() {
             )}
 
             {loadingSessions ? (
-              <div className="py-20 text-center text-slate-500 text-sm">
-                Cargando sesiones...
-              </div>
+              <div className="py-20 text-center text-slate-500 text-sm">Cargando sesiones...</div>
             ) : sessions.length === 0 ? (
               <div className="p-12 text-center border border-dashed border-slate-200 rounded-2xl bg-white/30">
                 <QrCode className="w-12 h-12 text-slate-600 mx-auto mb-3" />
                 <h3 className="font-semibold text-slate-600">No hay sesiones creadas</h3>
                 <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                  Crea tu primera clase para generar el código QR de asistencia y proyectarlo a tus alumnos.
+                  Crea tu primera clase para generar el código QR de asistencia y proyectarlo a tus
+                  alumnos.
                 </p>
               </div>
             ) : (
@@ -666,7 +641,8 @@ export default function TeacherPanelPage() {
                         {ses.subject}
                       </h3>
                       <p className="text-xs text-slate-600 mt-1">
-                        Grupo <span className="text-slate-700 font-semibold">{ses.groupName}</span> · {ses.date}
+                        Grupo <span className="text-slate-700 font-semibold">{ses.groupName}</span>{" "}
+                        · {ses.date}
                       </p>
                       <p className="text-xs text-slate-500 mt-0.5">
                         {ses.startTime.slice(0, 5)} - {ses.endTime.slice(0, 5)}
@@ -677,7 +653,8 @@ export default function TeacherPanelPage() {
                       <div className="flex items-center gap-1.5 text-slate-600">
                         <Users className="w-3.5 h-3.5 text-slate-500" />
                         <span>
-                          <strong className="text-slate-900">{ses.presents}</strong> / {ses.total} presentes
+                          <strong className="text-slate-900">{ses.presents}</strong> / {ses.total}{" "}
+                          presentes
                         </span>
                       </div>
                       <span className="text-teal-700 text-xs font-medium group-hover:translate-x-0.5 transition-transform">
@@ -693,270 +670,49 @@ export default function TeacherPanelPage() {
 
         {/* PESTAÑA: REPORTES */}
         {activeTab === "reportes" && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-3xl font-bold tracking-tight">Reportes de Asistencia</h2>
-                <p className="text-xs text-slate-600">
-                  Filtra por fechas, grupo y materias, y exporta en formato CSV para Excel.
-                </p>
-              </div>
-
-              <button
-                onClick={exportReportsCsv}
-                disabled={reports.length === 0}
-                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-100 disabled:text-slate-600 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all text-slate-900"
-              >
-                <Download className="w-4 h-4" />
-                <span>Exportar CSV</span>
-              </button>
-            </div>
-
-            {/* Filtros */}
-            <div className="p-4 bg-white border border-slate-200 rounded-2xl grid grid-cols-1 sm:grid-cols-5 gap-3 text-xs">
-              <div>
-                <label htmlFor="report-date-from" className="block text-slate-600 mb-1">
-                  Fecha Desde
-                </label>
-                <input
-                  id="report-date-from"
-                  type="date"
-                  value={reportFilters.dateFrom}
-                  onChange={(e) => setReportFilters({ ...reportFilters, dateFrom: e.target.value })}
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
-                />
-              </div>
-              <div>
-                <label htmlFor="report-date-to" className="block text-slate-600 mb-1">
-                  Fecha Hasta
-                </label>
-                <input
-                  id="report-date-to"
-                  type="date"
-                  value={reportFilters.dateTo}
-                  onChange={(e) => setReportFilters({ ...reportFilters, dateTo: e.target.value })}
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
-                />
-              </div>
-              <div>
-                <label htmlFor="report-group" className="block text-slate-600 mb-1">
-                  Grupo
-                </label>
-                <input
-                  id="report-group"
-                  type="text"
-                  maxLength={20}
-                  placeholder="Ej: 10A"
-                  value={reportFilters.groupName}
-                  onChange={(e) => setReportFilters({ ...reportFilters, groupName: e.target.value })}
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
-                />
-              </div>
-              <div>
-                <label htmlFor="report-subject" className="block text-slate-600 mb-1">
-                  Materia
-                </label>
-                <input
-                  id="report-subject"
-                  type="text"
-                  maxLength={120}
-                  placeholder="Ej: Matemáticas"
-                  value={reportFilters.subject}
-                  onChange={(e) => setReportFilters({ ...reportFilters, subject: e.target.value })}
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
-                />
-              </div>
-              <div className="flex items-end">
-                <button
-                  onClick={loadReports}
-                  disabled={loadingReports}
-                  className="w-full py-2 bg-teal-700 text-white hover:bg-teal-800 disabled:bg-slate-100 disabled:text-slate-500 rounded-lg font-semibold  transition-colors"
-                >
-                  {loadingReports ? "Consultando..." : "Aplicar Filtros"}
-                </button>
-              </div>
-            </div>
-
-            {reportsError && (
-              <div
-                role="alert"
-                className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-700 text-xs flex items-start gap-3"
-              >
-                <AlertCircle className="w-5 h-5 shrink-0" />
-                <span>{reportsError}</span>
-              </div>
-            )}
-
-            {reportsTruncated && (
-              <div
-                role="status"
-                className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 text-xs"
-              >
-                El reporte supera las 10.000 filas y fue truncado. Ajusta el rango de
-                fechas o los filtros para exportar el resto.
-              </div>
-            )}
-
-            {/* Tabla de registros */}
-            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-              <div className="p-4 border-b border-slate-200 flex items-center justify-between text-xs">
-                <span className="text-slate-600 font-medium">
-                  Total de registros encontrados: <strong className="text-slate-900">{reports.length}</strong>
-                </span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-slate-600">
-                  <thead className="bg-slate-50 text-slate-600 font-medium border-b border-slate-200">
-                    <tr>
-                      <th className="p-3">Sesión</th>
-                      <th className="p-3">Fecha</th>
-                      <th className="p-3">Hora</th>
-                      <th className="p-3">Documento</th>
-                      <th className="p-3">Estudiante</th>
-                      <th className="p-3">Grupo</th>
-                      <th className="p-3">Materia</th>
-                      <th className="p-3">Método</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {reports.map((row) => (
-                      <tr key={row.id} className="hover:bg-slate-100/40 transition-colors">
-                        <td className="p-3 font-mono font-bold text-teal-700">{row.sessionCode}</td>
-                        <td className="p-3">{row.date}</td>
-                        <td className="p-3 font-mono">{new Date(row.registeredAt).toLocaleTimeString().slice(0, 5)}</td>
-                        <td className="p-3 font-mono">{row.document}</td>
-                        <td className="p-3 font-medium text-slate-900">{row.studentName}</td>
-                        <td className="p-3">{row.group}</td>
-                        <td className="p-3">{row.subject}</td>
-                        <td className="p-3">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              row.method === "QR"
-                                ? "bg-blue-500/10 text-teal-700"
-                                : "bg-purple-500/10 text-purple-400"
-                            }`}
-                          >
-                            {row.method}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                    {reports.length === 0 && !loadingReports && (
-                      <tr>
-                        <td colSpan={8} className="p-8 text-center text-slate-500">
-                          No hay registros que coincidan con la búsqueda.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
+          <ReportsPanel
+            reports={reports}
+            loadingReports={loadingReports}
+            reportsError={reportsError}
+            reportFilters={reportFilters}
+            setReportFilters={setReportFilters}
+            loadReports={() => loadReports()}
+            exportReportsCsv={exportReportsCsv}
+          />
         )}
 
         {/* PESTAÑA: IMPORTADOR MASIVO */}
         {activeTab === "importar" && (
-          <div className="space-y-6 max-w-4xl">
-            <div>
-              <h2 className="text-3xl font-bold tracking-tight">Importador Masivo de Estudiantes</h2>
-              <p className="text-xs text-slate-600">
-                Pega directamente tus filas de Excel o CSV con las columnas: <br />
-                <code className="text-teal-700 font-mono">Documento, Nombre Completo, Grado, Grupo, Estado</code>
-              </p>
-            </div>
+          <ImportPanel
+            importCsvText={importCsvText}
+            setImportCsvText={setImportCsvText}
+            handleParseAndImport={handleParseAndImport}
+            importing={importing}
+            importSuccessMsg={importSuccessMsg}
+            importPreview={importPreview}
+          />
+        )}
 
-            {importSuccessMsg && (
-              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-2xl text-xs flex items-center gap-3">
-                <CheckCircle className="w-5 h-5 text-emerald-700" />
-                <span>{importSuccessMsg}</span>
-              </div>
-            )}
-
-            <div className="space-y-3">
-              <textarea
-                rows={7}
-                maxLength={500_000}
-                spellCheck={false}
-                aria-label="Filas de estudiantes para importar"
-                value={importCsvText}
-                onChange={(e) => setImportCsvText(e.target.value)}
-                placeholder={"1000000020,Estudiante Ejemplo Uno,10,10A,ACTIVO\n1000000021,Estudiante Ejemplo Dos,10,10A,ACTIVO"}
-                className="w-full p-4 bg-white border border-slate-200 rounded-2xl font-mono text-xs text-slate-900 placeholder-slate-600 focus:outline-none focus:border-blue-500"
-              />
-
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => handleParseAndImport(true)}
-                  disabled={importing || !importCsvText.trim()}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-700 disabled:opacity-50 text-slate-900 rounded-xl text-xs font-semibold transition-colors"
-                >
-                  Previsualizar y Validar
-                </button>
-                <button
-                  onClick={() => handleParseAndImport(false)}
-                  disabled={importing || !importCsvText.trim()}
-                  className="px-4 py-2.5 bg-teal-700 text-white hover:bg-teal-800 disabled:opacity-50  rounded-xl text-xs font-semibold shadow-lg shadow-teal-900/10 transition-colors"
-                >
-                  Importar a Base de Datos
-                </button>
-              </div>
-            </div>
-
-            {importPreview && (
-              <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-4">
-                <div className="grid grid-cols-4 gap-3 text-center text-xs">
-                  <div className="p-3 bg-slate-50 rounded-xl">
-                    <p className="text-slate-500">Filas Totales</p>
-                    <p className="text-lg font-bold text-slate-900 mt-1">{importPreview.summary.total}</p>
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-xl">
-                    <p className="text-slate-500">Válidas</p>
-                    <p className="text-lg font-bold text-emerald-700 mt-1">{importPreview.summary.valid}</p>
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-xl">
-                    <p className="text-slate-500">Duplicados</p>
-                    <p className="text-lg font-bold text-amber-400 mt-1">{importPreview.summary.duplicates}</p>
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-xl">
-                    <p className="text-slate-500">Inválidos</p>
-                    <p className="text-lg font-bold text-rose-400 mt-1">{importPreview.summary.invalid}</p>
-                  </div>
-                </div>
-
-                <div className="overflow-x-auto max-h-60 overflow-y-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-slate-600 sticky top-0">
-                      <tr>
-                        <th className="p-2">#</th>
-                        <th className="p-2">Doc</th>
-                        <th className="p-2">Nombre</th>
-                        <th className="p-2">Grupo</th>
-                        <th className="p-2">Diagnóstico</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800">
-                      {importPreview.preview.map((p) => (
-                        <tr key={p.row}>
-                          <td className="p-2 font-mono text-slate-500">{p.row}</td>
-                          <td className="p-2 font-mono">{p.document}</td>
-                          <td className="p-2">{p.fullName}</td>
-                          <td className="p-2">{p.groupName}</td>
-                          <td className="p-2">
-                            {p.valid ? (
-                              <span className="text-emerald-700 font-bold">Válido</span>
-                            ) : (
-                              <span className="text-rose-400">{p.errors.join(", ")}</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
+        {activeTab === "clases" && nextSessionCursor && (
+          <button
+            className="mt-6 px-5 py-3 border rounded-xl"
+            disabled={loadingSessions}
+            onClick={() => loadSessions(nextSessionCursor)}
+          >
+            Cargar más sesiones
+          </button>
+        )}
+        {activeTab === "reportes" && nextReportCursor && (
+          <button
+            className="mt-6 px-5 py-3 border rounded-xl"
+            disabled={loadingReports}
+            onClick={() => loadReports(nextReportCursor)}
+          >
+            Cargar más registros
+          </button>
+        )}
+        {activeTab === "academico" && userProfile?.role === "admin" && academic && (
+          <AcademicPanel data={academic} onSaved={loadAcademic} />
         )}
       </main>
 
@@ -979,7 +735,9 @@ export default function TeacherPanelPage() {
             <h3 id="create-session-title" className="text-lg font-bold mb-1">
               Crear Nueva Clase
             </h3>
-            <p className="text-xs text-slate-600 mb-5">Define la asignatura y el grupo para generar el código QR.</p>
+            <p className="text-xs text-slate-600 mb-5">
+              Define la asignatura y el grupo para generar el código QR.
+            </p>
 
             <form onSubmit={handleCreateSession} className="space-y-4 text-xs">
               <div>
@@ -1003,16 +761,28 @@ export default function TeacherPanelPage() {
                   <label htmlFor="create-group" className="block text-slate-600 mb-1">
                     Grupo
                   </label>
-                  <input
+                  <select
                     id="create-group"
-                    type="text"
                     required
-                    maxLength={20}
-                    placeholder="Ej: 10A"
                     value={createForm.groupName}
                     onChange={(e) => setCreateForm({ ...createForm, groupName: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900"
-                  />
+                    className="w-full p-2.5 border border-slate-200 rounded-xl"
+                  >
+                    <option value="">Selecciona un grupo asignado</option>
+                    {Array.from(
+                      new Set(
+                        (academic?.assignments || [])
+                          .filter((a) =>
+                            academic?.periods.some((p) => p.id === a.period_id && p.active),
+                          )
+                          .map((a) => a.group.name),
+                      ),
+                    ).map((group) => (
+                      <option key={group} value={group}>
+                        {group}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label htmlFor="create-date" className="block text-slate-600 mb-1">
@@ -1072,202 +842,23 @@ export default function TeacherPanelPage() {
 
       {/* MODAL: DETALLE DE SESIÓN / PROYECTOR QR */}
       {selectedSessionId && (
-        <div
-          className="fixed inset-0 bg-black/80  z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="session-detail-title"
-        >
-          <div className="w-full max-w-4xl bg-white border border-slate-200 rounded-3xl p-6 shadow-xl shadow-slate-200/60 relative my-auto">
-            <button
-              onClick={() => setSelectedSessionId(null)}
-              aria-label="Cerrar detalle de sesión"
-              className="absolute right-4 top-4 text-slate-600 hover:text-slate-900 p-1"
-            >
-              <X className="w-6 h-6" />
-            </button>
-
-            {loadingDetail ? (
-              <div className="py-24 text-center text-slate-600 text-sm">
-                Cargando detalles de la clase...
-              </div>
-            ) : detailError ? (
-              <div
-                role="alert"
-                className="my-12 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-700 text-sm flex items-start gap-3"
-              >
-                <AlertCircle className="w-5 h-5 shrink-0" />
-                <span>{detailError}</span>
-              </div>
-            ) : !sessionDetail ? (
-              <div className="py-24 text-center text-slate-600 text-sm">
-                No hay información disponible.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Lado Izquierdo: QR Gigante para proyector */}
-                <div className="flex flex-col items-center justify-center p-6 bg-slate-50 border border-slate-200 rounded-2xl text-center">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="font-mono font-bold text-xs px-2.5 py-0.5 rounded-full bg-blue-500/20 text-teal-700">
-                      CÓDIGO: {sessionDetail.session.code}
-                    </span>
-                    <button
-                      onClick={() => toggleSessionStatus(sessionDetail.session.status)}
-                      disabled={statusUpdating}
-                      aria-busy={statusUpdating}
-                      className={`text-xs font-bold px-3 py-0.5 rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                        sessionDetail.session.status === "ABIERTA"
-                          ? "bg-rose-500/20 border-rose-500/30 text-rose-700 hover:bg-rose-500/30"
-                          : "bg-emerald-500/20 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30"
-                      }`}
-                    >
-                      {statusUpdating
-                        ? "Actualizando..."
-                        : sessionDetail.session.status === "ABIERTA"
-                          ? "Cerrar Asistencia"
-                          : "Reabrir Asistencia"}
-                    </button>
-                  </div>
-
-                  <h3 id="session-detail-title" className="text-3xl font-bold tracking-tight text-slate-900 mb-1">
-                    {sessionDetail.session.subject}
-                  </h3>
-                  <p className="text-xs text-slate-600 mb-4">
-                    Grupo <strong>{sessionDetail.session.group_name}</strong> · {sessionDetail.session.date}
-                  </p>
-
-                  {/* QR Image nativa */}
-                  <div className="p-3 bg-white rounded-2xl shadow-xl shadow-slate-200/60 mb-3">
-                    <img
-                      src={sessionDetail.qrDataUrl}
-                      alt="Código QR de Asistencia"
-                      className="w-56 h-56 sm:w-64 sm:h-64 object-contain"
-                    />
-                  </div>
-
-                  <p className="text-xs text-slate-600 font-mono break-all max-w-xs">
-                    {sessionDetail.sessionUrl}
-                  </p>
-                </div>
-
-                {/* Lado Derecho: Asistencia en Vivo */}
-                <div className="flex flex-col h-full justify-between">
-                  <div>
-                    {/* Estadísticas rápidas */}
-                    <div className="grid grid-cols-3 gap-2 mb-4 text-center">
-                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                        <p className="text-[10px] text-slate-500">Total Grupo</p>
-                        <p className="text-base font-bold text-slate-900">{sessionDetail.stats.total}</p>
-                      </div>
-                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                        <p className="text-[10px] text-slate-500">Presentes</p>
-                        <p className="text-base font-bold text-emerald-700">{sessionDetail.stats.presentsCount}</p>
-                      </div>
-                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                        <p className="text-[10px] text-slate-500">Ausentes</p>
-                        <p className="text-base font-bold text-rose-400">{sessionDetail.stats.absentsCount}</p>
-                      </div>
-                    </div>
-
-                    {/* Marcado Manual Rápido */}
-                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4 text-xs">
-                      <p className="font-semibold text-slate-600 mb-2">Marcado Manual Docente</p>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          maxLength={40}
-                          aria-label="Documento del estudiante para marcado manual"
-                          placeholder="Documento del alumno"
-                          value={manualDocument}
-                          onChange={(e) => setManualDocument(e.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              handleManualAttendance();
-                            }
-                          }}
-                          className="flex-1 p-2 bg-white border border-slate-200 rounded-lg text-slate-900"
-                        />
-                        <button
-                          onClick={() => handleManualAttendance()}
-                          disabled={manualSubmitting || !manualDocument.trim()}
-                          className="px-3 py-2 bg-teal-700 text-white hover:bg-teal-800 disabled:opacity-50  rounded-lg font-semibold"
-                        >
-                          {manualSubmitting ? "Marcando..." : "Marcar"}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Lista de Presentes y Ausentes */}
-                    <div className="text-xs mb-2 flex items-center justify-between">
-                      <span className="font-bold text-slate-600">Lista de la sesión</span>
-                      <input
-                        type="text"
-                        maxLength={80}
-                        aria-label="Filtrar estudiantes por nombre"
-                        placeholder="Filtrar por nombre..."
-                        value={searchFilter}
-                        onChange={(e) => setSearchFilter(e.target.value.toLowerCase())}
-                        className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-slate-700 text-[11px]"
-                      />
-                    </div>
-
-                    <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1 text-xs">
-                      {/* Presentes */}
-                      {sessionDetail.presents
-                        .filter((p) => p.fullName.toLowerCase().includes(searchFilter))
-                        .map((p) => (
-                          <div
-                            key={p.attendanceId}
-                            className="p-2 bg-emerald-950/20 border border-emerald-500/20 rounded-xl flex items-center justify-between"
-                          >
-                            <div>
-                              <p className="font-bold text-emerald-300">{p.fullName}</p>
-                              <p className="text-[10px] text-slate-500 font-mono">{p.document}</p>
-                            </div>
-                            <span className="text-[10px] font-mono text-emerald-700">
-                              {new Date(p.registeredAt).toLocaleTimeString().slice(0, 5)}
-                            </span>
-                          </div>
-                        ))}
-
-                      {/* Ausentes */}
-                      {sessionDetail.absents
-                        .filter((a) => a.fullName.toLowerCase().includes(searchFilter))
-                        .map((a) => (
-                          <div
-                            key={a.id}
-                            className="p-2 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between"
-                          >
-                            <div>
-                              <p className="font-medium text-slate-600">{a.fullName}</p>
-                              <p className="text-[10px] text-slate-500 font-mono">{a.document}</p>
-                            </div>
-                            <button
-                              onClick={() => handleManualAttendance(a.document)}
-                              className="px-2 py-1 bg-slate-100 hover:bg-teal-700 hover:text-white rounded text-[10px] text-slate-600  transition-colors"
-                            >
-                              + Presente
-                            </button>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-
-                  <div className="pt-3 border-t border-slate-200 mt-4 text-right">
-                    <button
-                      onClick={() => openSessionDetail(sessionDetail.session.id)}
-                      className="text-xs text-teal-700 hover:underline flex items-center gap-1 ml-auto"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Actualizar lista</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <SessionDialog
+          setSelectedSessionId={setSelectedSessionId}
+          loadingDetail={loadingDetail}
+          detailError={detailError}
+          sessionDetail={sessionDetail}
+          toggleSessionStatus={toggleSessionStatus}
+          statusUpdating={statusUpdating}
+          manualDocument={manualDocument}
+          setManualDocument={setManualDocument}
+          handleManualAttendance={handleManualAttendance}
+          manualSubmitting={manualSubmitting}
+          searchFilter={searchFilter}
+          setSearchFilter={setSearchFilter}
+          openSessionDetail={openSessionDetail}
+          manualNote={manualNote}
+          setManualNote={setManualNote}
+        />
       )}
     </div>
   );

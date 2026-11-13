@@ -1,7 +1,10 @@
+import { logError } from "@/lib/observability";
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { generateQrDataUrl } from "@/lib/qr";
 import { generateSessionCode } from "@/lib/session-code";
+import { sessionUrl } from "@/lib/session-url";
+import { decodeCursor, encodeCursor, cursorFilter } from "@/lib/pagination";
 import { normalizeGroupText } from "@/lib/utils";
 import {
   cleanString,
@@ -29,81 +32,61 @@ interface NewSessionRecord extends SessionRecord {
   updated_at: string;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const auth = await requireStaff();
   if (!auth.ok) return auth.response;
-
   try {
-    // Cliente con la sesión del usuario: RLS limita docentes a sus propias
-    // sesiones y permite a los administradores ver todas.
-    const { supabase } = auth.ctx;
-
-    const [{ data: sessions, error }, { data: students, error: studentsError }] = await Promise.all([
-      supabase
+    const cursor = decodeCursor(new URL(request.url).searchParams.get("cursor"));
+    let query = auth.ctx.supabase
       .from("sessions")
-      .select(
-        `
-        id,
-        code,
-        subject,
-        group_name,
-        date,
-        start_time,
-        end_time,
-        status,
-        created_at,
-        attendances (count)
-      `
-      )
-      .order("created_at", { ascending: false }),
-      supabase
-      .from("students")
-      .select("group_name")
-      .eq("status", "ACTIVO")
-    ]);
-
-    if (error) {
-      console.error("Error listando sesiones:", error);
-      return NextResponse.json(
-        { success: false, message: "No fue posible cargar las sesiones." },
-        { status: 500 }
-      );
-    }
-
-    if (studentsError) {
-      console.error("Error contando estudiantes por grupo:", studentsError);
-    }
-
-    const countByGroup: Record<string, number> = {};
-    students?.forEach((student: { group_name: string | null }) => {
-      const group = normalizeGroupText(student.group_name || "");
-      countByGroup[group] = (countByGroup[group] || 0) + 1;
+      .select("id,code,subject,group_name,date,start_time,end_time,status,created_at")
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(51);
+    if (cursor) query = query.or(cursorFilter("created_at", cursor));
+    const { data, error } = await query;
+    if (error) throw error;
+    const rows = (data || []).slice(0, 50) as SessionRecord[];
+    const { data: counts, error: countError } = await auth.ctx.supabase.rpc("session_counts", {
+      p_ids: rows.map((r) => r.id),
     });
-
-    const formattedSessions = (sessions as SessionRecord[] | null || []).map((session) => {
-      const group = normalizeGroupText(session.group_name);
-      const presentsCount = session.attendances?.[0]?.count || 0;
-
-      return {
-        id: session.id,
-        code: session.code,
-        subject: session.subject,
-        groupName: session.group_name,
-        date: session.date,
-        startTime: session.start_time,
-        endTime: session.end_time,
-        status: session.status,
-        presents: presentsCount,
-        total: countByGroup[group] || 0,
-      };
+    if (countError) throw countError;
+    const byId = new Map<string, { total: number; presents: number }>(
+      (counts || []).map((r: { session_id: string; total: number; presents: number }) => [
+        r.session_id,
+        r,
+      ]),
+    );
+    const last = rows.at(-1);
+    return NextResponse.json({
+      success: true,
+      sessions: rows.map((r) => ({
+        id: r.id,
+        code: r.code,
+        subject: r.subject,
+        groupName: r.group_name,
+        date: r.date,
+        startTime: r.start_time,
+        endTime: r.end_time,
+        status: r.status,
+        presents: Number(byId.get(r.id)?.presents || 0),
+        total: Number(byId.get(r.id)?.total || 0),
+      })),
+      nextCursor:
+        (data?.length || 0) > 50 && last
+          ? encodeCursor({ timestamp: last.created_at, id: last.id })
+          : null,
     });
-
-    return NextResponse.json({ success: true, sessions: formattedSessions });
   } catch (error) {
-    console.error("Error inesperado en GET /api/sessions:", error);
     return NextResponse.json(
-      { success: false, message: "Error interno del servidor." },
-      { status: 500 }
+      {
+        success: false,
+        message:
+          error instanceof Error && error.message === "Invalid cursor"
+            ? "Cursor inválido."
+            : "No fue posible cargar las sesiones.",
+      },
+      { status: error instanceof Error && error.message === "Invalid cursor" ? 400 : 500 },
     );
   }
 }
@@ -116,7 +99,7 @@ export async function POST(request: Request) {
   if (!body) {
     return NextResponse.json(
       { success: false, message: "Cuerpo de solicitud inválido." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -129,21 +112,21 @@ export async function POST(request: Request) {
   if (!subject || !groupName || !date || !startTime || !endTime) {
     return NextResponse.json(
       { success: false, message: "Todos los campos de la sesión son obligatorios." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   if (!isValidDateString(date)) {
     return NextResponse.json(
       { success: false, message: "La fecha de la sesión no es válida." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   if (endTime <= startTime) {
     return NextResponse.json(
       { success: false, message: "La hora de fin debe ser posterior a la hora de inicio." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -165,6 +148,7 @@ export async function POST(request: Request) {
           start_time: startTime,
           end_time: endTime,
           status: "ABIERTA",
+          qr_token_required: true,
         })
         .select()
         .single();
@@ -179,29 +163,27 @@ export async function POST(request: Request) {
     }
 
     if (!newSession) {
-      console.error("Error creando sesión:", lastError);
+      logError("src/app/api/sessions", lastError, request.headers.get("x-request-id"));
       return NextResponse.json(
         { success: false, message: "No fue posible crear la sesión." },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
-    const sessionUrl = `${getAppBaseUrl(request)}/asistencia?sesion=${encodeURIComponent(
-      newSession.code
-    )}`;
-    const qrDataUrl = await generateQrDataUrl(sessionUrl);
+    const link = sessionUrl(getAppBaseUrl(request), newSession.code, true);
+    const qrDataUrl = await generateQrDataUrl(link);
 
     return NextResponse.json({
       success: true,
       session: newSession,
       qrDataUrl,
-      sessionUrl,
+      sessionUrl: link,
     });
   } catch (error) {
-    console.error("Error inesperado en POST /api/sessions:", error);
+    logError("src/app/api/sessions", error, request.headers.get("x-request-id"));
     return NextResponse.json(
       { success: false, message: "Error interno del servidor." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

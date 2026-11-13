@@ -1,3 +1,5 @@
+> Informe histórico de la mejora visual anterior. La versión profesional actual está documentada en [docs/VALIDATION.md](./docs/VALIDATION.md).
+
 # Revisión de diseño y rendimiento — 12 de noviembre de 2026
 
 ## Cambios y evidencia
