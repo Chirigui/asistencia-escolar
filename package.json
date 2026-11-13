@@ -1,40 +1,54 @@
 {
   "name": "asistencia-escolar-qr",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "engines": {
-    "node": ">=22.6.0"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "node --experimental-strip-types --test test/business_logic.test.ts test/validation.test.ts test/session_code.test.ts",
-    "verify:rls": "node scripts/verify-rls.mjs"
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "verify:rls": "node scripts/verify-rls.mjs",
+    "test:db": "node scripts/test-database.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "npm test && npm run test:db && npm run lint && npm run typecheck && npm run build",
+    "test:browser": "playwright test",
+    "release:build": "npm test && npm run test:db && npm run lint -- --max-warnings=0 && npm run typecheck && next build",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/*.mjs\" \"test/*.ts\" \"e2e/*.ts\" playwright.config.ts"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.12.7",
-    "@supabase/supabase-js": "^2.119.0",
-    "clsx": "^2.1.1",
-    "date-fns": "^4.1.0",
-    "lucide-react": "^0.475.0",
-    "next": "^16.4.6",
-    "qrcode": "^1.5.4",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "tailwind-merge": "^2.6.0"
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.119.0",
+    "clsx": "2.1.1",
+    "date-fns": "4.1.0",
+    "lucide-react": "0.475.0",
+    "next": "16.4.6",
+    "qrcode": "1.5.4",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "tailwind-merge": "2.6.0"
   },
   "devDependencies": {
-    "@types/node": "^20.17.19",
-    "@types/qrcode": "^1.5.5",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "autoprefixer": "^10.4.20",
-    "eslint": "^10.14.0",
-    "eslint-config-next": "^16.4.6",
-    "postcss": "^8.5.2",
-    "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.3"
+    "@electric-sql/pglite": "0.5.16",
+    "@playwright/test": "1.65.0",
+    "@types/node": "24.19.2",
+    "@types/qrcode": "1.5.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "autoprefixer": "10.4.20",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.4.6",
+    "postcss": "8.5.32",
+    "prettier": "3.10.1",
+    "tailwindcss": "3.4.17",
+    "typescript": "5.7.3"
+  },
+  "overrides": {
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.1"
+    }
   }
 }

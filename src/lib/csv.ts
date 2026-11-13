@@ -27,14 +27,10 @@ export function buildCsv(headers: string[], rows: unknown[][]): string {
  * Parser pequeño de CSV/TSV con soporte para campos entre comillas y comas
  * internas. No pretende cubrir todo RFC 4180, sólo la importación del panel.
  */
-export function parseDelimited(
-  text: string,
-  forcedDelimiter?: string
-): string[][] {
+export function parseDelimited(text: string, forcedDelimiter?: string): string[][] {
   const normalized = text.replace(/^\uFEFF/, "");
   const firstLine = normalized.split(/\r?\n/, 1)[0] ?? "";
-  const delimiter =
-    forcedDelimiter ?? (firstLine.includes("\t") ? "\t" : ",");
+  const delimiter = forcedDelimiter ?? (firstLine.includes("\t") ? "\t" : ",");
 
   const rows: string[][] = [];
   let row: string[] = [];
@@ -83,7 +79,5 @@ export function parseDelimited(
 
 export function isImportHeaderRow(cells: string[]): boolean {
   const first = (cells[0] ?? "").trim().toLowerCase();
-  return ["documento", "document", "doc", "identificacion", "identificación"].includes(
-    first
-  );
+  return ["documento", "document", "doc", "identificacion", "identificación"].includes(first);
 }

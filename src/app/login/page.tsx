@@ -27,9 +27,10 @@ export default function LoginPage() {
       });
 
       if (error) {
-        setErrorMsg(error.message === "Invalid login credentials"
-          ? "Credenciales incorrectas. Verifica tu correo y contraseña."
-          : error.message
+        setErrorMsg(
+          error.message === "Invalid login credentials"
+            ? "Credenciales incorrectas. Verifica tu correo y contraseña."
+            : error.message,
         );
         return;
       }
@@ -49,9 +50,20 @@ export default function LoginPage() {
     <main className="school-entry min-h-screen bg-slate-50 grid lg:grid-cols-2 items-center gap-12 p-6 lg:px-[8vw] relative">
       <section className="hidden lg:block max-w-xl">
         <p className="eyebrow">ASISTENCIA ESCOLAR</p>
-        <h2 className="mt-6 text-6xl font-bold tracking-tight leading-[1.08] text-slate-900">Cada clase<br />cuenta<span className="text-teal-700">.</span></h2>
-        <p className="mt-6 text-lg leading-relaxed text-slate-600 max-w-md">Más tiempo para enseñar. Un espacio para organizar tus clases y acompañar la asistencia de tus estudiantes.</p>
-        <div className="mt-10 border-t border-slate-200 pt-6 flex gap-8 text-sm text-slate-600"><span>01 · Crea tu clase</span><span>02 · Comparte el QR</span><span>03 · Revisa asistencia</span></div>
+        <h2 className="mt-6 text-6xl font-bold tracking-tight leading-[1.08] text-slate-900">
+          Cada clase
+          <br />
+          cuenta<span className="text-teal-700">.</span>
+        </h2>
+        <p className="mt-6 text-lg leading-relaxed text-slate-600 max-w-md">
+          Más tiempo para enseñar. Un espacio para organizar tus clases y acompañar la asistencia de
+          tus estudiantes.
+        </p>
+        <div className="mt-10 border-t border-slate-200 pt-6 flex gap-8 text-sm text-slate-600">
+          <span>01 · Crea tu clase</span>
+          <span>02 · Comparte el QR</span>
+          <span>03 · Revisa asistencia</span>
+        </div>
       </section>
 
       <div className="w-full max-w-md mx-auto bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-xl shadow-slate-200/60 relative z-10">
@@ -67,7 +79,10 @@ export default function LoginPage() {
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label htmlFor="login-email" className="block text-xs font-medium text-slate-600 mb-1.5">
+            <label
+              htmlFor="login-email"
+              className="block text-xs font-medium text-slate-600 mb-1.5"
+            >
               Correo Institucional
             </label>
             <div className="relative">
@@ -86,7 +101,10 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label htmlFor="login-password" className="block text-xs font-medium text-slate-600 mb-1.5">
+            <label
+              htmlFor="login-password"
+              className="block text-xs font-medium text-slate-600 mb-1.5"
+            >
               Contraseña
             </label>
             <div className="relative">

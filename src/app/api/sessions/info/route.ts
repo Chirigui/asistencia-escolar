@@ -1,6 +1,8 @@
+import { logError } from "@/lib/observability";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { checkDistributedLimit } from "@/lib/distributed-limit";
+import { verifyQrToken } from "@/lib/qr-token";
 import { getClientIp } from "@/lib/validation";
 
 const SESSION_CODE_RE = /^[A-Z0-9-]{1,32}$/;
@@ -16,15 +18,15 @@ function todayInAppTimeZone(): string {
 
 export async function GET(request: Request) {
   const ip = getClientIp(request);
-  const limit = checkRateLimit(`session-info:${ip}`, 60, 60_000);
+  const limit = await checkDistributedLimit("session-info", ip, "", 3000);
 
   if (!limit.allowed) {
     return NextResponse.json(
       { success: false, message: "Demasiadas consultas. Intenta de nuevo en un minuto." },
       {
-        status: 429,
+        status: limit.unavailable ? 503 : 429,
         headers: { "Retry-After": String(limit.retryAfterSeconds) },
-      }
+      },
     );
   }
 
@@ -34,14 +36,14 @@ export async function GET(request: Request) {
   if (!code) {
     return NextResponse.json(
       { success: false, message: "Código de sesión no proporcionado." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   if (!SESSION_CODE_RE.test(code)) {
     return NextResponse.json(
       { success: false, message: "El código de sesión no es válido." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -52,32 +54,43 @@ export async function GET(request: Request) {
 
     const { data: session, error } = await supabase
       .from("sessions")
-      .select("code, subject, group_name, date, start_time, end_time, status")
+      .select("code, subject, group_name, date, start_time, end_time, status, qr_token_required")
       .eq("code", code)
       .maybeSingle();
 
     if (error) {
-      console.error("Error consultando sesión pública:", error);
+      logError("src/app/api/sessions/info", error, request.headers.get("x-request-id"));
       return NextResponse.json(
         { success: false, message: "Error interno del servidor." },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
     if (!session) {
       return NextResponse.json(
         { success: false, message: "La sesión no existe o ya caducó." },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
+    if (
+      session.qr_token_required &&
+      !verifyQrToken(code, searchParams.get("token") || "", process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    )
+      return NextResponse.json(
+        {
+          success: false,
+          message: "El QR venció o no es válido. Pide al profesor actualizar el código.",
+        },
+        { status: 410 },
+      );
     if (session.status !== "ABIERTA") {
       return NextResponse.json(
         {
           success: false,
           message: "El profesor ha cerrado la toma de asistencia para esta clase.",
         },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
@@ -87,7 +100,7 @@ export async function GET(request: Request) {
           success: false,
           message: "La sesión no corresponde a la fecha de hoy.",
         },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
@@ -97,10 +110,10 @@ export async function GET(request: Request) {
       message: "Sesión disponible para registro.",
     });
   } catch (error) {
-    console.error("Error inesperado en GET /api/sessions/info:", error);
+    logError("src/app/api/sessions/info", error, request.headers.get("x-request-id"));
     return NextResponse.json(
       { success: false, message: "Error interno del servidor." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

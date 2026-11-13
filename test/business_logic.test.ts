@@ -1,12 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizeDocument, normalizeGroupText } from "../src/lib/utils.ts";
-import {
-  buildCsv,
-  escapeCsvCell,
-  isImportHeaderRow,
-  parseDelimited,
-} from "../src/lib/csv.ts";
+import { buildCsv, escapeCsvCell, isImportHeaderRow, parseDelimited } from "../src/lib/csv.ts";
 
 test("Normalización de Documentos de Identidad", async (t) => {
   await t.test("debe eliminar espacios, puntos y guiones", () => {
@@ -49,15 +44,23 @@ test("Validación de Detección de Duplicados en Importación", () => {
     return { docNorm, duplicate };
   });
 
-  assert.strictEqual(results[0].duplicate, true, "El estudiante existente en BD debe marcarse como duplicado");
+  assert.strictEqual(
+    results[0].duplicate,
+    true,
+    "El estudiante existente en BD debe marcarse como duplicado",
+  );
   assert.strictEqual(results[1].duplicate, false, "El nuevo estudiante debe aceptarse como válido");
-  assert.strictEqual(results[2].duplicate, true, "El estudiante duplicado en el mismo lote debe marcarse como duplicado");
+  assert.strictEqual(
+    results[2].duplicate,
+    true,
+    "El estudiante duplicado en el mismo lote debe marcarse como duplicado",
+  );
 });
 
 test("Parser de importación CSV/TSV", async (t) => {
   await t.test("debe respetar comas y comillas dentro de campos entrecomillados", () => {
     const rows = parseDelimited(
-      '1001,"Mendoza, Carlos","10","10A","ACTIVO"\n1002,"Ana ""La Jefa"" Ruiz",10,10B,ACTIVO'
+      '1001,"Mendoza, Carlos","10","10A","ACTIVO"\n1002,"Ana ""La Jefa"" Ruiz",10,10B,ACTIVO',
     );
 
     assert.deepStrictEqual(rows[0], ["1001", "Mendoza, Carlos", "10", "10A", "ACTIVO"]);
@@ -66,7 +69,7 @@ test("Parser de importación CSV/TSV", async (t) => {
 
   await t.test("debe detectar tabulaciones y omitir líneas vacías", () => {
     const rows = parseDelimited(
-      "Documento\tNombre\tGrado\tGrupo\tEstado\n\n1003\tAna\t10\t10A\tACTIVO\n"
+      "Documento\tNombre\tGrado\tGrupo\tEstado\n\n1003\tAna\t10\t10A\tACTIVO\n",
     );
 
     assert.strictEqual(rows.length, 2);
@@ -86,7 +89,7 @@ test("Exportación CSV segura", async (t) => {
   });
 
   await t.test("debe neutralizar fórmulas de Excel", () => {
-    assert.strictEqual(escapeCsvCell("=HYPERLINK(\"http://x\")"), `"'=HYPERLINK(""http://x"")"`);
+    assert.strictEqual(escapeCsvCell('=HYPERLINK("http://x")'), `"'=HYPERLINK(""http://x"")"`);
     assert.strictEqual(escapeCsvCell("@SUM(A1)"), `"'@SUM(A1)"`);
   });
 

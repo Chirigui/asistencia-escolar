@@ -1,12 +1,12 @@
-export type Role = 'teacher' | 'admin';
+export type Role = "teacher" | "admin";
 
-export type StudentStatus = 'ACTIVO' | 'INACTIVO' | 'RETIRADO';
+export type StudentStatus = "ACTIVO" | "INACTIVO" | "RETIRADO";
 
-export type SessionStatus = 'ABIERTA' | 'CERRADA' | 'FINALIZADA';
+export type SessionStatus = "ABIERTA" | "CERRADA" | "FINALIZADA";
 
-export type AttendanceStatus = 'PRESENTE' | 'TARDE' | 'JUSTIFICADO';
+export type AttendanceStatus = "PRESENTE" | "TARDE" | "JUSTIFICADO";
 
-export type AttendanceMethod = 'QR' | 'MANUAL' | 'ADMIN';
+export type AttendanceMethod = "QR" | "MANUAL" | "ADMIN";
 
 export interface Profile {
   id: string;

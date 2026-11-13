@@ -64,13 +64,11 @@ async function main() {
   }
 
   const missing = Object.entries(credentials).filter(
-    ([, value]) => !value.email || !value.password
+    ([, value]) => !value.email || !value.password,
   );
   if (missing.length > 0) {
     console.log(
-      `SKIP: faltan credenciales de prueba para: ${missing
-        .map(([label]) => label)
-        .join(", ")}.`
+      `SKIP: faltan credenciales de prueba para: ${missing.map(([label]) => label).join(", ")}.`,
     );
     return;
   }
@@ -83,13 +81,13 @@ async function main() {
   const anonSessions = await anon.from("sessions").select("id");
   check(
     !anonSessions.error && (anonSessions.data?.length ?? 0) === 0,
-    "anon no puede leer sessions"
+    "anon no puede leer sessions",
   );
 
   const anonIncidents = await anon.from("incidents").select("id");
   check(
     !anonIncidents.error && (anonIncidents.data?.length ?? 0) === 0,
-    "anon no puede leer incidents"
+    "anon no puede leer incidents",
   );
 
   const anonRpc = await anon.rpc("register_student_attendance", {
@@ -103,22 +101,18 @@ async function main() {
   const admin = await signIn("admin", credentials.admin);
 
   console.log("\n[2] Aislamiento entre docentes");
-  const aSessions = await teacherA.client
-    .from("sessions")
-    .select("id, teacher_id, status");
-  const bSessions = await teacherB.client
-    .from("sessions")
-    .select("id, teacher_id, status");
+  const aSessions = await teacherA.client.from("sessions").select("id, teacher_id, status");
+  const bSessions = await teacherB.client.from("sessions").select("id, teacher_id, status");
 
   check(!aSessions.error, "teacherA puede consultar sus sesiones");
   check(!bSessions.error, "teacherB puede consultar sus sesiones");
   check(
     (aSessions.data ?? []).every((row) => row.teacher_id === teacherA.userId),
-    "teacherA sólo ve sesiones propias"
+    "teacherA sólo ve sesiones propias",
   );
   check(
     (bSessions.data ?? []).every((row) => row.teacher_id === teacherB.userId),
-    "teacherB sólo ve sesiones propias"
+    "teacherB sólo ve sesiones propias",
   );
 
   const aIds = new Set((aSessions.data ?? []).map((row) => row.id));
@@ -133,7 +127,7 @@ async function main() {
       .maybeSingle();
     check(
       !foreignSession.error && foreignSession.data === null,
-      "teacherA no puede leer una sesión de teacherB"
+      "teacherA no puede leer una sesión de teacherB",
     );
   }
 
@@ -143,13 +137,13 @@ async function main() {
     !aProfiles.error &&
       (aProfiles.data ?? []).length === 1 &&
       aProfiles.data[0].id === teacherA.userId,
-    "teacherA sólo ve su propio perfil"
+    "teacherA sólo ve su propio perfil",
   );
 
   const adminProfiles = await admin.client.from("profiles").select("id, role");
   check(
     !adminProfiles.error && (adminProfiles.data ?? []).length > 1,
-    "admin puede ver todos los perfiles"
+    "admin puede ver todos los perfiles",
   );
 
   const adminSessions = await admin.client.from("sessions").select("id");
@@ -157,7 +151,7 @@ async function main() {
     !adminSessions.error &&
       (adminSessions.data ?? []).length >=
         (aSessions.data ?? []).length + (bSessions.data ?? []).length,
-    "admin ve las sesiones de ambos docentes"
+    "admin ve las sesiones de ambos docentes",
   );
 
   console.log("\n[4] RPC y escrituras restringidas");
@@ -165,27 +159,20 @@ async function main() {
     p_session_code: "S000000",
     p_document_normalized: "0000000000",
   });
-  check(
-    Boolean(teacherRpc.error),
-    "un docente no puede ejecutar el RPC directamente"
-  );
+  check(Boolean(teacherRpc.error), "un docente no puede ejecutar el RPC directamente");
 
   console.log("\n[5] Incidencias");
-  const aIncidents = await teacherA.client
-    .from("incidents")
-    .select("id, session_id");
+  const aIncidents = await teacherA.client.from("incidents").select("id, session_id");
   check(
     !aIncidents.error &&
-      (aIncidents.data ?? []).every(
-        (row) => row.session_id && aIds.has(row.session_id)
-      ),
-    "teacherA sólo ve incidencias de sus sesiones"
+      (aIncidents.data ?? []).every((row) => row.session_id && aIds.has(row.session_id)),
+    "teacherA sólo ve incidencias de sus sesiones",
   );
 
   console.log(
     failures.length === 0
       ? "\nVerificación RLS completada sin fallos."
-      : `\nVerificación RLS con ${failures.length} fallo(s).`
+      : `\nVerificación RLS con ${failures.length} fallo(s).`,
   );
   process.exitCode = failures.length === 0 ? 0 : 1;
 }

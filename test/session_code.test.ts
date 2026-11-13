@@ -13,9 +13,7 @@ test("Generación de códigos de sesión", async (t) => {
   });
 
   await t.test("genera códigos distintos en una muestra amplia", () => {
-    const codes = new Set(
-      Array.from({ length: 500 }, () => generateSessionCode())
-    );
+    const codes = new Set(Array.from({ length: 500 }, () => generateSessionCode()));
     assert.ok(codes.size > 490, "se esperaban códigos prácticamente únicos");
   });
 

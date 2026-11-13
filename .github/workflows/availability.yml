@@ -1,0 +1,15 @@
+name: Production availability
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */2 * * *"
+permissions:
+  contents: read
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check application and database readiness
+        run: |
+          curl --fail --silent --show-error --retry 2 --max-time 15 https://asistencia-escolar-taupe.vercel.app/api/health/ready

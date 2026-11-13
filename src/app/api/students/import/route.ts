@@ -1,3 +1,4 @@
+import { logError } from "@/lib/observability";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { normalizeDocument, normalizeGroupText } from "@/lib/utils";
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
   if (!body) {
     return NextResponse.json(
       { success: false, message: "Cuerpo de solicitud inválido." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -53,7 +54,7 @@ export async function POST(request: Request) {
   if (!Array.isArray(rows) || rows.length === 0) {
     return NextResponse.json(
       { success: false, message: "No se proporcionaron filas para procesar." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
         success: false,
         message: `La importación admite como máximo ${MAX_IMPORT_ROWS} filas por lote.`,
       },
-      { status: 413 }
+      { status: 413 },
     );
   }
 
@@ -75,9 +76,7 @@ export async function POST(request: Request) {
     const incomingDocs = new Set<string>();
     rows.forEach((row) => {
       if (!row || typeof row !== "object" || Array.isArray(row)) return;
-      const docNorm = normalizeDocument(
-        cleanString((row as StudentImportRow).document, 40)
-      );
+      const docNorm = normalizeDocument(cleanString((row as StudentImportRow).document, 40));
       if (docNorm) incomingDocs.add(docNorm);
     });
 
@@ -85,12 +84,7 @@ export async function POST(request: Request) {
     // Se consultan variantes en mayúsculas/minúsculas para no duplicar datos
     // históricos que se hayan guardado con otra capitalización.
     const docs = Array.from(
-      new Set(
-        Array.from(incomingDocs).flatMap((doc) => [
-          doc,
-          doc.toLowerCase(),
-        ])
-      )
+      new Set(Array.from(incomingDocs).flatMap((doc) => [doc, doc.toLowerCase()])),
     );
 
     for (let i = 0; i < docs.length; i += EXISTING_LOOKUP_CHUNK) {
@@ -101,15 +95,15 @@ export async function POST(request: Request) {
         .in("document_normalized", chunk);
 
       if (error) {
-        console.error("Error consultando documentos existentes:", error);
+        logError("src/app/api/students/import", error, request.headers.get("x-request-id"));
         return NextResponse.json(
           { success: false, message: "No fue posible validar la matrícula existente." },
-          { status: 500 }
+          { status: 500 },
         );
       }
 
       (data || []).forEach((student: { document_normalized: string }) =>
-        existingDocs.add(normalizeDocument(student.document_normalized))
+        existingDocs.add(normalizeDocument(student.document_normalized)),
       );
     }
 
@@ -171,9 +165,7 @@ export async function POST(request: Request) {
           group_name: group,
           status,
         });
-      } else if (
-        errors.some((error) => error.includes("existe") || error.includes("Duplicado"))
-      ) {
+      } else if (errors.some((error) => error.includes("existe") || error.includes("Duplicado"))) {
         duplicateCount += 1;
       } else {
         invalidCount += 1;
@@ -192,9 +184,7 @@ export async function POST(request: Request) {
     });
 
     if (dryRun !== true && validStudentsToInsert.length > 0) {
-      const { error: insertError } = await supabase
-        .from("students")
-        .insert(validStudentsToInsert);
+      const { error: insertError } = await supabase.from("students").insert(validStudentsToInsert);
 
       if (insertError) {
         if (insertError.code === "23505") {
@@ -204,14 +194,14 @@ export async function POST(request: Request) {
               message:
                 "La matrícula cambió mientras se validaba (documento duplicado). Vuelve a previsualizar.",
             },
-            { status: 409 }
+            { status: 409 },
           );
         }
 
-        console.error("Error guardando estudiantes:", insertError);
+        logError("src/app/api/students/import", insertError, request.headers.get("x-request-id"));
         return NextResponse.json(
           { success: false, message: "No fue posible guardar los estudiantes." },
-          { status: 500 }
+          { status: 500 },
         );
       }
     }
@@ -229,10 +219,10 @@ export async function POST(request: Request) {
       preview: validatedRows.slice(0, 50),
     });
   } catch (error) {
-    console.error("Error inesperado en /api/students/import:", error);
+    logError("src/app/api/students/import", error, request.headers.get("x-request-id"));
     return NextResponse.json(
       { success: false, message: "Error interno del servidor." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

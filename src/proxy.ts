@@ -2,6 +2,26 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function proxy(request: NextRequest) {
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    if (
+      process.env.VERCEL_ENV === "preview" &&
+      !["GET", "HEAD", "OPTIONS"].includes(request.method)
+    )
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Las vistas previas son de sólo lectura. Usa el entorno de pruebas aislado para validar escrituras.",
+        },
+        { status: 403 },
+      );
+    const requestId = crypto.randomUUID();
+    const headers = new Headers(request.headers);
+    headers.set("x-request-id", requestId);
+    const response = NextResponse.next({ request: { headers } });
+    response.headers.set("x-request-id", requestId);
+    return response;
+  }
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -33,20 +53,18 @@ export async function proxy(request: NextRequest) {
           value: string;
           options: CookieOptions;
         }>,
-        headers?: Record<string, string>
+        headers?: Record<string, string>,
       ) {
-        cookiesToSet.forEach(({ name, value }) =>
-          request.cookies.set(name, value)
-        );
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
         supabaseResponse = NextResponse.next({
           request,
         });
         cookiesToSet.forEach(({ name, value, options }) =>
-          supabaseResponse.cookies.set(name, value, options)
+          supabaseResponse.cookies.set(name, value, options),
         );
         // Evita que CDNs/proxies cacheados sirvan cookies de sesión a otro usuario.
         Object.entries(headers ?? {}).forEach(([key, value]) =>
-          supabaseResponse.headers.set(key, value)
+          supabaseResponse.headers.set(key, value),
         );
       },
     },
@@ -73,10 +91,7 @@ export async function proxy(request: NextRequest) {
       .eq("id", user.id)
       .maybeSingle();
 
-    if (
-      !profile ||
-      (profile.role !== "teacher" && profile.role !== "admin")
-    ) {
+    if (!profile || (profile.role !== "teacher" && profile.role !== "admin")) {
       const url = request.nextUrl.clone();
       url.pathname = "/asistencia";
       url.search = "";
@@ -96,5 +111,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/profesor/:path*", "/login"],
+  matcher: ["/profesor/:path*", "/login", "/api/:path*"],
 };

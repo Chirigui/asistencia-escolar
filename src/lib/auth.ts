@@ -12,9 +12,7 @@ export interface StaffContext {
   role: StaffRole;
 }
 
-type AuthResult =
-  | { ok: true; ctx: StaffContext }
-  | { ok: false; response: NextResponse };
+type AuthResult = { ok: true; ctx: StaffContext } | { ok: false; response: NextResponse };
 
 /**
  * Obtiene el usuario autenticado y su perfil profesional.
@@ -33,10 +31,7 @@ export async function requireStaff(): Promise<AuthResult> {
   if (authError || !user) {
     return {
       ok: false,
-      response: NextResponse.json(
-        { success: false, message: "No autorizado." },
-        { status: 401 }
-      ),
+      response: NextResponse.json({ success: false, message: "No autorizado." }, { status: 401 }),
     };
   }
 
@@ -46,16 +41,12 @@ export async function requireStaff(): Promise<AuthResult> {
     .eq("id", user.id)
     .maybeSingle();
 
-  if (
-    profileError ||
-    !profile ||
-    (profile.role !== "teacher" && profile.role !== "admin")
-  ) {
+  if (profileError || !profile || (profile.role !== "teacher" && profile.role !== "admin")) {
     return {
       ok: false,
       response: NextResponse.json(
         { success: false, message: "Acceso restringido al personal docente." },
-        { status: 403 }
+        { status: 403 },
       ),
     };
   }
@@ -80,7 +71,7 @@ export async function requireAdmin(): Promise<AuthResult> {
       ok: false,
       response: NextResponse.json(
         { success: false, message: "Esta operación requiere rol de administrador." },
-        { status: 403 }
+        { status: 403 },
       ),
     };
   }

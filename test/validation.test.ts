@@ -11,10 +11,7 @@ import {
 
 test("Validación de UUID", async (t) => {
   await t.test("acepta UUID v4 válidos", () => {
-    assert.equal(
-      isUuid("550e8400-e29b-41d4-a716-446655440000"),
-      true
-    );
+    assert.equal(isUuid("550e8400-e29b-41d4-a716-446655440000"), true);
   });
 
   await t.test("rechaza formatos inválidos", () => {
@@ -126,4 +123,20 @@ test("Obtención de IP del cliente", async (t) => {
     });
     assert.equal(getClientIp(request), "198.51.100.7");
   });
+});
+
+test("rechaza cuerpos chunked que superan el límite sin Content-Length", async () => {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(2_000_001));
+      controller.close();
+    },
+  });
+  const request = new Request("http://localhost/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: stream,
+    duplex: "half",
+  } as RequestInit);
+  assert.equal(await readJsonObject(request), null);
 });

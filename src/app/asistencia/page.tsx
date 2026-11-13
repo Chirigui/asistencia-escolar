@@ -41,7 +41,11 @@ interface RegisterResult {
 function AttendanceClock() {
   const [time, setTime] = useState("—");
   useEffect(() => {
-    const formatter = new Intl.DateTimeFormat("es-CO", { hour: "2-digit", minute: "2-digit", timeZone: "America/Bogota" });
+    const formatter = new Intl.DateTimeFormat("es-CO", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "America/Bogota",
+    });
     const update = () => setTime(formatter.format(new Date()));
     update();
     const timer = setInterval(update, 60_000);
@@ -55,12 +59,11 @@ function StudentAttendanceForm() {
   const sessionCodeFromUrl = searchParams.get("sesion") || searchParams.get("s") || "";
 
   const sessionCode = sessionCodeFromUrl.toUpperCase();
+  const token = searchParams.get("token") || "";
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [loadingSession, setLoadingSession] = useState(Boolean(sessionCode));
   const [sessionError, setSessionError] = useState(
-    sessionCode
-      ? ""
-      : "Por favor escanea el código QR de tu clase para registrarte."
+    sessionCode ? "" : "Por favor escanea el código QR de tu clase para registrarte.",
   );
 
   const [documentInput, setDocumentInput] = useState("");
@@ -74,7 +77,10 @@ function StudentAttendanceForm() {
     const fetchSession = async () => {
       try {
         setLoadingSession(true);
-        const res = await fetch(`/api/sessions/info?code=${encodeURIComponent(sessionCode)}`, { signal: controller.signal, cache: "no-store" });
+        const res = await fetch(
+          `/api/sessions/info?code=${encodeURIComponent(sessionCode)}&token=${encodeURIComponent(token)}`,
+          { signal: controller.signal, cache: "no-store" },
+        );
         const data = await res.json();
 
         if (controller.signal.aborted) return;
@@ -95,7 +101,7 @@ function StudentAttendanceForm() {
 
     fetchSession();
     return () => controller.abort();
-  }, [sessionCode]);
+  }, [sessionCode, token]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,6 +116,7 @@ function StudentAttendanceForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionCode,
+          token,
           document: documentInput.trim(),
         }),
       });
@@ -154,7 +161,15 @@ function StudentAttendanceForm() {
         </div>
       </div>
 
-      <div className="mb-7"><p className="eyebrow">REGISTRO DE ASISTENCIA</p><h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">Tu presencia cuenta.</h1><p className="mt-2 text-sm leading-relaxed text-slate-600">Confirma tu llegada a clase con tu documento.</p></div>
+      <div className="mb-7">
+        <p className="eyebrow">REGISTRO DE ASISTENCIA</p>
+        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
+          Tu presencia cuenta.
+        </h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-600">
+          Confirma tu llegada a clase con tu documento.
+        </p>
+      </div>
       {/* Tarjeta de la clase activa */}
       {loadingSession ? (
         <div className="p-5 rounded-2xl bg-slate-100/50 border border-slate-200 animate-pulse mb-6 text-center text-slate-600 text-sm">
@@ -167,15 +182,12 @@ function StudentAttendanceForm() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
               CLASE ABIERTA
             </span>
-            <span className="text-xs font-mono font-medium text-slate-600">
-              {session.code}
-            </span>
+            <span className="text-xs font-mono font-medium text-slate-600">{session.code}</span>
           </div>
-          <h3 className="text-lg font-bold text-slate-900 leading-tight">
-            {session.subject}
-          </h3>
+          <h3 className="text-lg font-bold text-slate-900 leading-tight">{session.subject}</h3>
           <p className="text-xs text-slate-600 mt-1">
-            Grupo <span className="font-semibold text-slate-700">{session.group_name}</span> · Horario: {session.start_time.slice(0, 5)} - {session.end_time.slice(0, 5)}
+            Grupo <span className="font-semibold text-slate-700">{session.group_name}</span> ·
+            Horario: {session.start_time.slice(0, 5)} - {session.end_time.slice(0, 5)}
           </p>
         </div>
       ) : (
@@ -195,10 +207,7 @@ function StudentAttendanceForm() {
       {session && (
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label
-              htmlFor="document"
-              className="block text-xs font-medium text-slate-600 mb-1.5"
-            >
+            <label htmlFor="document" className="block text-xs font-medium text-slate-600 mb-1.5">
               Número de Identificación / Tarjeta de Identidad
             </label>
             <input
@@ -247,8 +256,8 @@ function StudentAttendanceForm() {
             result.success
               ? "bg-emerald-50 border-emerald-500/40 text-emerald-800"
               : result.code === "ALREADY_REGISTERED"
-              ? "bg-amber-50 border-amber-500/40 text-amber-800"
-              : "bg-rose-50 border-rose-500/40 text-rose-800"
+                ? "bg-amber-50 border-amber-500/40 text-amber-800"
+                : "bg-rose-50 border-rose-500/40 text-rose-800"
           }`}
         >
           <div className="flex items-start gap-3">
@@ -265,12 +274,10 @@ function StudentAttendanceForm() {
                 {result.success
                   ? "¡Asistencia Confirmada!"
                   : result.code === "ALREADY_REGISTERED"
-                  ? "Registro Previo Detectado"
-                  : "No se pudo registrar"}
+                    ? "Registro Previo Detectado"
+                    : "No se pudo registrar"}
               </h4>
-              <p className="text-xs mt-1 text-slate-600 leading-relaxed">
-                {result.message}
-              </p>
+              <p className="text-xs mt-1 text-slate-600 leading-relaxed">{result.message}</p>
 
               {result.data && (
                 <div className="mt-2.5 pt-2 border-t border-emerald-500/20 text-xs space-y-0.5 font-medium">
