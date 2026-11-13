@@ -25,6 +25,13 @@ END $$;
 RESET ROLE;
 CREATE TEMP TABLE retained_counts AS SELECT (SELECT count(*) FROM public.students) students,(SELECT count(*) FROM public.profiles) profiles,(SELECT count(*) FROM public.teaching_assignments) assignments,(SELECT count(*) FROM public.enrollments) enrollments,(SELECT count(*) FROM public.school_groups) groups;
 SET LOCAL ROLE service_role;
+SELECT public.verify_test_activity_cleanup('70000000-0000-4000-8000-000000000002','BORRAR SESIONES DE PRUEBA');
+RESET ROLE;
+DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM public.sessions WHERE code='WINDOW-3') OR NOT EXISTS(SELECT 1 FROM public.attendances) THEN RAISE EXCEPTION 'FAIL verification committed cleanup'; END IF;
+ IF EXISTS(SELECT 1 FROM public.audit_events WHERE action='test_activity.clear') THEN RAISE EXCEPTION 'FAIL verification left audit changes'; END IF;
+END $$;
+SET LOCAL ROLE service_role;
 SELECT public.clear_test_activity('70000000-0000-4000-8000-000000000002','BORRAR SESIONES DE PRUEBA');
 RESET ROLE;
 DO $$ BEGIN

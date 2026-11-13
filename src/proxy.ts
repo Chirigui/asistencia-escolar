@@ -25,6 +25,13 @@ export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
   });
+  supabaseResponse.headers.set("Cache-Control", "private, no-store");
+  const redirectWithCookies = (url: URL) => {
+    const response = NextResponse.redirect(url);
+    supabaseResponse.cookies.getAll().forEach((cookie) => response.cookies.set(cookie));
+    response.headers.set("Cache-Control", "private, no-store");
+    return response;
+  };
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -37,7 +44,7 @@ export async function proxy(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = "/login";
       url.search = "";
-      return NextResponse.redirect(url);
+      return redirectWithCookies(url);
     }
     return supabaseResponse;
   }
@@ -59,6 +66,7 @@ export async function proxy(request: NextRequest) {
         supabaseResponse = NextResponse.next({
           request,
         });
+        supabaseResponse.headers.set("Cache-Control", "private, no-store");
         cookiesToSet.forEach(({ name, value, options }) =>
           supabaseResponse.cookies.set(name, value, options),
         );
@@ -80,7 +88,7 @@ export async function proxy(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = "/login";
       url.search = "";
-      return NextResponse.redirect(url);
+      return redirectWithCookies(url);
     }
 
     // Defensa en profundidad: un usuario autenticado sin perfil docente/admin
@@ -95,7 +103,7 @@ export async function proxy(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = "/asistencia";
       url.search = "";
-      return NextResponse.redirect(url);
+      return redirectWithCookies(url);
     }
   }
 
@@ -104,7 +112,7 @@ export async function proxy(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/profesor";
     url.search = "";
-    return NextResponse.redirect(url);
+    return redirectWithCookies(url);
   }
 
   return supabaseResponse;

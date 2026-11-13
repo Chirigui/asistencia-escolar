@@ -9,10 +9,21 @@ export default defineConfig({
     { name: "desktop", use: { ...devices["Desktop Chrome"] } },
     { name: "mobile", use: { ...devices["iPhone 13"], defaultBrowserType: "chromium" } },
   ],
-  webServer: {
-    command: "npm run start -- --port 3100",
-    url: "http://127.0.0.1:3100/login",
-    reuseExistingServer: !process.env.CI,
-    timeout: 30000,
-  },
+  webServer: [
+    ...(process.env.AUTH_E2E_MOCK === "true"
+      ? [
+          {
+            command: "node scripts/mock-auth.mjs",
+            url: "http://127.0.0.1:54321/health",
+            reuseExistingServer: false,
+          },
+        ]
+      : []),
+    {
+      command: "npm run start -- --port 3100",
+      url: "http://127.0.0.1:3100/login",
+      reuseExistingServer: !process.env.CI,
+      timeout: 30000,
+    },
+  ],
 });

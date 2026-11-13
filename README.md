@@ -86,6 +86,7 @@ En un proyecto nuevo, ejecutar en orden:
 3. `supabase/migrations/20261113000100_professional_foundation.sql`.
 4. `supabase/migrations/20261113040306_streamline_policy_evaluation.sql`.
 5. `supabase/migrations/20261113134055_session_window_and_test_cleanup.sql`.
+6. `supabase/migrations/20261113141421_fix_scoped_test_cleanup.sql`.
 
 En el proyecto existente sólo se aplica la migración que falte. El historial remoto incluye migraciones antiguas que no están completas en esta copia del repositorio: no ejecutar `supabase db push` sin reconciliar ese historial. Ver [operación](./docs/OPERATIONS.md).
 

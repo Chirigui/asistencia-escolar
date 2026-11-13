@@ -47,6 +47,10 @@ El proxy genera X-Request-Id en APIs. El cliente de base de datos administrativo
 
 ## Alcance de las garantías
 
+El login se procesa en `/api/auth/login`: verifica las credenciales y el perfil docente, escribe cookies antes de la navegación y no devuelve tokens al JavaScript de la página. El layout de `/profesor` vuelve a validar la sesión en el servidor. Escribir la URL con una sesión ya iniciada permite entrar; una petición sin cookies se redirige a login. El cierre de sesión se procesa en servidor y vuelve a cargar login para descartar el estado del panel en memoria.
+
+La limpieza usa una lista de IDs capturada bajo bloqueo y condiciones WHERE explícitas; no desactiva `safeupdate` de Supabase. `verify_test_activity_cleanup` es una RPC sólo de servicio para comprobar esa operación con rollback obligatorio de todos los cambios. No debe confundirse con `clear_test_activity`, que sí elimina datos cuando se confirma. CI usa autenticación sintética para probar cookies, permisos, error de contraseña y cierre de sesión sin cuentas reales.
+
 El QR firmado vence en 15 minutos y se renueva al actualizar el proyector. Las sesiones anteriores mantienen enlaces compatibles. Un QR y un documento no prueban presencia física ni propiedad de la identidad. No se activa geolocalización, biometría ni alta de cuentas estudiantiles sin un proceso institucional definido.
 
 La exportación usa un límite superior de fecha de registro y páginas por cursor; los datos de matrícula se obtienen del padrón de sesión. Las correcciones de asistencia durante una exportación pueden reflejarse en páginas posteriores: no es un snapshot transaccional de toda la extracción.
