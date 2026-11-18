@@ -16,6 +16,28 @@ DO $$ BEGIN
  BEGIN UPDATE public.audit_events SET action='forged'; RAISE EXCEPTION 'FAIL: mutable audit'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $$;
 
+-- The daily summary follows the roster captured when the teacher opened the class.
+DO $$ BEGIN
+ IF public.coordination_day(current_date) IS NOT NULL THEN RAISE EXCEPTION 'Teacher could see coordination'; END IF;
+END $$;
+SELECT set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000003',true);
+DO $$
+DECLARE day_of_class date := (now() AT TIME ZONE 'America/Bogota')::date;
+        summary jsonb;
+BEGIN
+ INSERT INTO public.daily_expected_groups(day,group_id)
+ SELECT day_of_class,id FROM public.school_groups WHERE normalized_name IN ('TESTA','TESTB')
+ ON CONFLICT DO NOTHING;
+ summary := public.coordination_day(day_of_class);
+ IF jsonb_array_length(summary->'expected') <> 2 OR summary#>'{sessions,0,absences}' IS DISTINCT FROM 'null'::jsonb
+ THEN RAISE EXCEPTION 'Unexpected open-session summary'; END IF;
+ UPDATE public.sessions SET status='CERRADA' WHERE code='TEST-SESSION';
+ IF public.coordination_day(day_of_class)#>>'{sessions,0,absences}' IS DISTINCT FROM '1'
+ THEN RAISE EXCEPTION 'Unexpected closed-session absences'; END IF;
+ UPDATE public.sessions SET status='ABIERTA' WHERE code='TEST-SESSION';
+END $$;
+SELECT set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000001',true);
+
 -- Force the audit trigger to fail; the attendance must not survive its subtransaction.
 SELECT set_config('request.headers','not-json',true);
 DO $$ BEGIN

@@ -3,6 +3,8 @@
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 const tokens = new Map();
+const expectedByDay = new Map();
+const group = { id: "72000000-0000-4000-8000-000000000001", name: "6A" };
 const send = (res, status, data, extra = {}) => {
   res.writeHead(status, { "Content-Type": "application/json", ...extra });
   res.end(JSON.stringify(data));
@@ -16,12 +18,18 @@ http
       let text = "";
       for await (const chunk of req) text += chunk;
       const body = JSON.parse(text || "{}");
-      if (body.email !== "teacher@example.invalid" || body.password !== "ci-fixture-password")
+      if (
+        !["teacher@example.invalid", "admin@example.invalid"].includes(body.email) ||
+        body.password !== "ci-fixture-password"
+      )
         return send(res, 400, {
           error_code: "invalid_credentials",
           msg: "Invalid login credentials",
         });
-      const sub = "70000000-0000-4000-8000-000000000001";
+      const sub =
+        body.email === "admin@example.invalid"
+          ? "70000000-0000-4000-8000-000000000002"
+          : "70000000-0000-4000-8000-000000000001";
       const payload = {
         sub,
         aud: "authenticated",
@@ -64,7 +72,24 @@ http
     if (url.pathname === "/rest/v1/rpc/consume_request_limit")
       return send(res, 200, { allowed: true, retryAfterSeconds: 1 });
     if (!tokens.has(token)) return send(res, 401, { message: "Not authenticated" });
-    if (url.pathname === "/rest/v1/profiles") return send(res, 200, [{ role: "teacher" }]);
+    const role = tokens.get(token).email === "admin@example.invalid" ? "admin" : "teacher";
+    if (url.pathname === "/rest/v1/profiles") return send(res, 200, [{ role }]);
+    if (url.pathname === "/rest/v1/school_groups") return send(res, 200, [group]);
+    if (
+      url.pathname === "/rest/v1/daily_expected_groups" ||
+      url.pathname === "/rest/v1/rpc/coordination_day"
+    ) {
+      if (role !== "admin") return send(res, 403, {});
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const body = JSON.parse(raw || "{}");
+      if (url.pathname.endsWith("coordination_day")) {
+        return send(res, 200, { expected: expectedByDay.get(body.p_day) || [], sessions: [] });
+      }
+      if (req.method === "POST") expectedByDay.set(body.day, [body.group_id]);
+      if (req.method === "DELETE") expectedByDay.delete(url.searchParams.get("day")?.slice(3));
+      return send(res, 200, {});
+    }
     if (url.pathname === "/rest/v1/academic_periods")
       return send(res, 200, [
         {

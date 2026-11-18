@@ -1,5 +1,24 @@
 # Evidencias de profesionalización
 
+## Piloto de un colegio · 18 de noviembre de 2026
+
+La versión local pasó las verificaciones para una demostración con matrícula ficticia. El lanzamiento con matrícula real requiere validar el entorno del colegio.
+
+- Node 24.22.3, compilación de producción con Turbopack, 46 pruebas unitarias y 12 casos de navegador aprobados en Chromium de escritorio y móvil emulado. Los casos de autenticación usan identidades sintéticas y el caso de confirmación del QR simula la respuesta de la API.
+- PostgreSQL 17 en America/Bogota. Ocho registros manuales simultáneos del mismo estudiante produjeron una asistencia y una entrada de auditoría. El cierre esperó al registro en curso. Las regresiones probaron el QR, padrón, permisos y la diferencia entre sesión abierta y ausencia al cierre.
+- Se corrigieron valores por defecto de columnas de tiempo que desplazaban cinco horas las altas con la base en America/Bogota. La migración sólo cambia escrituras futuras.
+- npm audit informó cero vulnerabilidades conocidas en el árbol de dependencias consultado.
+- En el HTML de producción, los scripts iniciales sumaron 177 776 bytes gzip en acceso y 178 961 en registro. Son tamaños de archivos. La latencia con red escolar, la capacidad a primera hora y los tiempos en celulares físicos siguen pendientes de medición.
+- Se restauró la base sintética en el ensayo embebido. Antes de cobrar por operación continua, recuperar en un entorno aislado una copia representativa con datos y cuentas y comprobar el acceso y los reportes.
+
+### Preparación de la instalación
+
+1. Usar un entorno propio del nuevo colegio. Antes de cargar la matrícula comprobar cuentas, permisos y padrón. Mantener `ENABLE_TEST_CLEANUP=false` durante la operación escolar. La función de limpieza incluye todas las sesiones anteriores a su ejecución.
+2. Aplicar en orden las dos migraciones del 18 de noviembre en el entorno de piloto. Configurar nombre, escudo local opcional y color mediante las tres variables `NEXT_PUBLIC_SCHOOL_*` de `.env.example` antes de compilar.
+3. En Coordinación, con cuenta administradora, elegir fecha y grupos esperados. La selección se comparte por fecha para toda la institución. Un grupo con clase iniciada sale de pendientes. Una clase abierta muestra registro en curso y una cerrada calcula faltantes de su propio padrón. Si se reabre, las ausencias vuelven a quedar pendientes de cierre.
+4. Ensayar con docentes del colegio la creación de clases simultáneas, registro desde su red, cierre y exportación. Acordar el volumen de alumnos esperado y medir errores y tiempos de espera en esa jornada antes de ofrecer garantías comerciales.
+
+
 - Migración probada en PostgreSQL embebido antes de su aplicación remota.
 - Matriz de pruebas con casos permitidos y denegados: docente propio/ajeno, grupo sin asignar, escalada de rol, auditoría inmutable, duplicados, sesión cerrada, QR válido/ajeno, cuota distribuida y padrón histórico.
 - Prueba de fallo forzado de auditoría: se confirma que la asistencia no permanece guardada.

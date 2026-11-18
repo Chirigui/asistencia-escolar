@@ -1,7 +1,9 @@
 "use client";
+import SchoolMark from "@/components/ui/school-mark";
+import { school } from "@/lib/school";
 
 import { useState } from "react";
-import { GraduationCap, Lock, Mail, ArrowRight, ShieldCheck } from "lucide-react";
+import { Lock, Mail, ArrowRight, ShieldCheck } from "lucide-react";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -37,30 +39,23 @@ export default function LoginPage() {
 
   return (
     <main className="school-entry min-h-screen bg-slate-50 grid lg:grid-cols-2 items-center gap-12 p-6 lg:px-[8vw] relative">
-      <section className="hidden lg:block max-w-xl">
-        <p className="eyebrow">ASISTENCIA ESCOLAR</p>
-        <h2 className="mt-6 text-6xl font-bold tracking-tight leading-[1.08] text-slate-900">
-          Cada clase
-          <br />
-          cuenta<span className="text-teal-700">.</span>
+      <section className="school-cover hidden lg:flex flex-col justify-end">
+        <p className="text-sm tracking-wide">{school.name}</p>
+        <h2 className="mt-5 text-6xl tracking-tight leading-tight font-serif">
+          Asistencia escolar
         </h2>
-        <p className="mt-6 text-lg leading-relaxed text-slate-600 max-w-md">
-          Más tiempo para enseñar. Un espacio para organizar tus clases y acompañar la asistencia de
-          tus estudiantes.
+        <p className="mt-5 max-w-sm text-base leading-relaxed">
+          Abre tu clase, proyecta el código QR y consulta la lista de asistencia.
         </p>
-        <div className="mt-10 border-t border-slate-200 pt-6 flex gap-8 text-sm text-slate-600">
-          <span>01 · Crea tu clase</span>
-          <span>02 · Comparte el QR</span>
-          <span>03 · Revisa asistencia</span>
-        </div>
       </section>
 
       <div className="w-full max-w-md mx-auto bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-xl shadow-slate-200/60 relative z-10">
-        <div className="text-center mb-8">
-          <div className="w-14 h-14 bg-teal-50 border border-blue-500/30 rounded-2xl flex items-center justify-center mx-auto mb-4 text-teal-700">
-            <GraduationCap className="w-8 h-8" />
-          </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Bienvenido a tu aula</h1>
+        <div className="mb-8">
+          <p className="eyebrow mb-3">{school.name}</p>
+          <SchoolMark />
+          <h1 className="mt-4 text-2xl font-bold text-slate-900 tracking-tight">
+            Bienvenido a tu aula
+          </h1>
           <p className="text-xs text-slate-600 mt-1">
             Ingreso exclusivo para profesores y directivos
           </p>
