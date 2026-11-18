@@ -1,15 +1,10 @@
 "use client";
+import SchoolMark from "@/components/ui/school-mark";
+import { school } from "@/lib/school";
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import {
-  CheckCircle2,
-  AlertTriangle,
-  XCircle,
-  GraduationCap,
-  Clock,
-  ArrowRight,
-} from "lucide-react";
+import { CheckCircle2, AlertTriangle, XCircle, Clock, ArrowRight } from "lucide-react";
 
 interface SessionInfo {
   id: string;
@@ -54,12 +49,22 @@ function AttendanceClock() {
   return <time aria-label="Hora de Colombia">{time}</time>;
 }
 
-function StudentAttendanceForm() {
+function AttendanceFromUrl() {
   const searchParams = useSearchParams();
   const sessionCodeFromUrl = searchParams.get("sesion") || searchParams.get("s") || "";
 
   const sessionCode = sessionCodeFromUrl.toUpperCase();
   const token = searchParams.get("token") || "";
+  return (
+    <StudentAttendanceForm
+      key={sessionCode + "/" + token}
+      sessionCode={sessionCode}
+      token={token}
+    />
+  );
+}
+
+function StudentAttendanceForm({ sessionCode, token }: { sessionCode: string; token: string }) {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [loadingSession, setLoadingSession] = useState(Boolean(sessionCode));
   const [sessionError, setSessionError] = useState(
@@ -145,12 +150,10 @@ function StudentAttendanceForm() {
       {/* Cabecera */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-teal-700 text-white flex items-center justify-center font-bold  shadow-lg shadow-blue-500/30">
-            <GraduationCap className="w-5 h-5" />
-          </div>
+          <SchoolMark />
           <div>
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600">
-              Colegio San José
+              {school.name}
             </h2>
             <p className="text-sm font-semibold text-slate-900">Asistencia escolar</p>
           </div>
@@ -162,9 +165,8 @@ function StudentAttendanceForm() {
       </div>
 
       <div className="mb-7">
-        <p className="eyebrow">REGISTRO DE ASISTENCIA</p>
         <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
-          Tu presencia cuenta.
+          Registro de asistencia
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-600">
           Confirma tu llegada a clase con tu documento.
@@ -204,7 +206,7 @@ function StudentAttendanceForm() {
       )}
 
       {/* Formulario de documento */}
-      {session && (
+      {session && !result?.success && (
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="document" className="block text-xs font-medium text-slate-600 mb-1.5">
@@ -214,7 +216,6 @@ function StudentAttendanceForm() {
               id="document"
               type="text"
               inputMode="numeric"
-              pattern="[0-9]*"
               autoComplete="off"
               maxLength={30}
               autoFocus
@@ -292,10 +293,16 @@ function StudentAttendanceForm() {
         </div>
       )}
 
+      {result?.success && (
+        <button
+          className="mt-4 text-sm font-semibold text-teal-800 underline"
+          onClick={() => setResult(null)}
+        >
+          Registrar otro estudiante
+        </button>
+      )}
       <div className="mt-8 pt-4 border-t border-slate-200 text-center">
-        <p className="text-[11px] text-slate-500">
-          Sistema Seguro de Asistencia Escolar · Desarrollado para uso institucional
-        </p>
+        <p className="text-[11px] text-slate-500">{school.name}</p>
       </div>
     </div>
   );
@@ -305,7 +312,7 @@ export default function AsistenciaPage() {
   return (
     <main className="school-entry min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <Suspense fallback={<div className="text-slate-600">Cargando aplicación...</div>}>
-        <StudentAttendanceForm />
+        <AttendanceFromUrl />
       </Suspense>
     </main>
   );

@@ -20,6 +20,7 @@ test("anonymous clients cannot list or write school data", async ({ request }) =
   for (const path of [
     "/api/sessions",
     "/api/academic",
+    "/api/coordination",
     "/api/reports",
     "/api/reports/export",
     "/api/maintenance",
@@ -36,4 +37,31 @@ test("anonymous clients cannot list or write school data", async ({ request }) =
     data: { action: "clear", confirmation: "BORRAR SESIONES DE PRUEBA" },
   });
   expect(cleanup.status()).toBe(401);
+});
+
+test("student receives a single clear receipt after submitting a classroom QR", async ({
+  page,
+}) => {
+  await page.route("**/api/sessions/info?**", (route) =>
+    route.fulfill({
+      json: {
+        success: true,
+        session: {
+          code: "STEST01",
+          subject: "Matemáticas",
+          group_name: "6A",
+          start_time: "08:00",
+          end_time: "08:10",
+        },
+      },
+    }),
+  );
+  await page.route("**/api/attendance/register", (route) =>
+    route.fulfill({ json: { success: true, message: "Registro guardado." } }),
+  );
+  await page.goto("/asistencia?sesion=STEST01&token=fixture");
+  await page.getByLabel(/Número de Identificación/).fill("TEST12345");
+  await page.getByRole("button", { name: "Registrar Asistencia" }).click();
+  await expect(page.getByRole("status")).toContainText("Asistencia Confirmada");
+  await expect(page.getByRole("button", { name: "Registrar Asistencia" })).toHaveCount(0);
 });

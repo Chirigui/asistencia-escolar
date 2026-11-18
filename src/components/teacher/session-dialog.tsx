@@ -155,7 +155,9 @@ export default function SessionDialog({
                     </p>
                   </div>
                   <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                    <p className="text-[10px] text-slate-500">Ausentes</p>
+                    <p className="text-[10px] text-slate-500">
+                      {sessionDetail.session.status === "ABIERTA" ? "Por registrar" : "Ausentes"}
+                    </p>
                     <p className="text-base font-bold text-rose-700">
                       {sessionDetail.stats.absentsCount}
                     </p>

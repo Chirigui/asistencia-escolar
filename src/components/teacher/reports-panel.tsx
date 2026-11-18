@@ -1,6 +1,7 @@
 "use client";
 import type { Dispatch, SetStateAction } from "react";
 import type { ReportRow } from "@/types/teacher";
+import { school } from "@/lib/school";
 import { Download, AlertCircle } from "lucide-react";
 interface Props {
   reports: ReportRow[];
@@ -24,6 +25,7 @@ export default function ReportsPanel({
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
+          <p className="eyebrow mb-2">{school.name}</p>
           <h2 className="text-3xl font-bold tracking-tight">Reportes de Asistencia</h2>
           <p className="text-xs text-slate-600">
             Filtra por fechas, grupo y materias, y exporta en formato CSV para Excel.

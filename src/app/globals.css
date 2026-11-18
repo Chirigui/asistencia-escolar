@@ -95,3 +95,31 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+.school-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.75rem;
+  background: var(--school-color);
+  color: white;
+}
+.school-cover {
+  min-height: min(70vh, 46rem);
+  padding: clamp(2rem, 4vw, 5rem);
+  border-radius: 1.5rem;
+  background: linear-gradient(150deg, transparent, #001a23a8), var(--school-color);
+  color: white;
+}
+.school-entry {
+  background-color: #f4f5f1;
+  background-image: none;
+}
+.bg-teal-700 {
+  background-color: var(--school-color);
+}
+.eyebrow {
+  color: var(--school-color);
+}

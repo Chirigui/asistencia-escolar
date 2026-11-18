@@ -1,10 +1,13 @@
 "use client";
+import SchoolMark from "@/components/ui/school-mark";
+import { school } from "@/lib/school";
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { AcademicData } from "@/types/academic";
 import { sessionWindow } from "@/lib/session-window";
+const CoordinationPanel = dynamic(() => import("@/components/teacher/coordination-panel"));
 const ReportsPanel = dynamic(() => import("@/components/teacher/reports-panel"), {
   loading: () => (
     <p role="status" className="p-8">
@@ -21,16 +24,7 @@ const ImportPanel = dynamic(() => import("@/components/teacher/import-panel"), {
 });
 const SessionDialog = dynamic(() => import("@/components/teacher/session-dialog"));
 const AcademicPanel = dynamic(() => import("@/components/teacher/academic-panel"));
-import {
-  GraduationCap,
-  PlusCircle,
-  QrCode,
-  Users,
-  LogOut,
-  X,
-  AlertCircle,
-  RefreshCw,
-} from "lucide-react";
+import { PlusCircle, QrCode, Users, LogOut, X, AlertCircle, RefreshCw } from "lucide-react";
 
 import type { SessionListItem, SessionDetail, ReportRow, ImportPreview } from "@/types/teacher";
 
@@ -43,9 +37,9 @@ export default function TeacherPanelPage() {
     window.addEventListener("pageshow", revalidate);
     return () => window.removeEventListener("pageshow", revalidate);
   }, []);
-  const [activeTab, setActiveTab] = useState<"clases" | "reportes" | "importar" | "academico">(
-    "clases",
-  );
+  const [activeTab, setActiveTab] = useState<
+    "clases" | "reportes" | "importar" | "academico" | "coordinacion"
+  >("clases");
   const [userProfile, setUserProfile] = useState<{ email?: string; role?: string } | null>(null);
 
   const [academic, setAcademic] = useState<AcademicData | null>(null);
@@ -457,11 +451,9 @@ export default function TeacherPanelPage() {
       {/* Barra de navegación superior */}
       <header className="min-h-20 gap-4 flex-wrap py-4 border-b border-slate-200 bg-white/60  px-4 sm:px-8 flex items-center justify-between sticky top-0 z-40">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-teal-700 text-white flex items-center justify-center font-bold  shadow-lg shadow-teal-900/10">
-            <GraduationCap className="w-5 h-5" />
-          </div>
+          <SchoolMark />
           <div>
-            <h1 className="text-sm font-bold leading-tight">Asistencia · Espacio docente</h1>
+            <h1 className="text-sm font-bold leading-tight">{school.name} · Espacio docente</h1>
             <p className="text-[11px] text-slate-600 font-mono">
               {userProfile?.email || "Cargando..."}
             </p>
@@ -515,6 +507,15 @@ export default function TeacherPanelPage() {
                 Organización
               </button>
             )}
+            {userProfile?.role === "admin" && (
+              <button
+                className="px-3 rounded-lg aria-pressed:bg-teal-700 aria-pressed:text-white"
+                aria-pressed={activeTab === "coordinacion"}
+                onClick={() => setActiveTab("coordinacion")}
+              >
+                Coordinación
+              </button>
+            )}
           </nav>
 
           <button
@@ -526,34 +527,39 @@ export default function TeacherPanelPage() {
           </button>
         </div>
       </header>
-      <section
-        className="max-w-7xl w-full mx-auto px-4 sm:px-8 pt-8"
-        aria-label="Resumen de sesiones cargadas"
-      >
-        <p className="eyebrow">TU JORNADA ESCOLAR</p>
-        <p className="text-xs text-slate-600 mt-2" role="status">
-          {lastUpdated
-            ? `Actualizado a las ${lastUpdated} · resumen de las sesiones cargadas`
-            : "Cargando sesiones…"}
-        </p>
-        <div className="grid grid-cols-3 gap-3 mt-4">
-          <div className="stat-card">
-            <span>Sesiones cargadas</span>
-            <strong>{sessions.length}</strong>
+      {activeTab === "clases" && (
+        <section
+          className="max-w-7xl w-full mx-auto px-4 sm:px-8 pt-8"
+          aria-label="Resumen de sesiones cargadas"
+        >
+          <p className="eyebrow">TU JORNADA ESCOLAR</p>
+          <p className="text-xs text-slate-600 mt-2" role="status">
+            {lastUpdated
+              ? `Actualizado a las ${lastUpdated} · resumen de las sesiones cargadas`
+              : "Cargando sesiones…"}
+          </p>
+          <div className="grid grid-cols-3 gap-3 mt-4">
+            <div className="stat-card">
+              <span>Sesiones cargadas</span>
+              <strong>{sessions.length}</strong>
+            </div>
+            <div className="stat-card">
+              <span>Abiertas</span>
+              <strong>{sessions.filter((s) => s.status === "ABIERTA").length}</strong>
+            </div>
+            <div className="stat-card">
+              <span>Registros</span>
+              <strong>{sessions.reduce((sum, s) => sum + s.presents, 0)}</strong>
+            </div>
           </div>
-          <div className="stat-card">
-            <span>Abiertas</span>
-            <strong>{sessions.filter((s) => s.status === "ABIERTA").length}</strong>
-          </div>
-          <div className="stat-card">
-            <span>Registros</span>
-            <strong>{sessions.reduce((sum, s) => sum + s.presents, 0)}</strong>
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Contenido según pestaña */}
       <main className="flex-1 p-4 sm:p-8 max-w-7xl w-full mx-auto">
+        {activeTab === "coordinacion" && academic?.role === "admin" && (
+          <CoordinationPanel groups={academic.groups} openSession={openSessionDetail} />
+        )}
         {/* PESTAÑA: CLASES Y QR */}
         {activeTab === "clases" && (
           <div className="space-y-6">
