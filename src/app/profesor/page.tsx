@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import SchoolMark from "@/components/ui/school-mark";
 import { school } from "@/lib/school";
 
@@ -698,9 +699,9 @@ export default function TeacherPanelPage() {
           <>
             <div className="mb-6">
               {userProfile?.role === "admin" && (
-                <a className="font-semibold text-teal-800 underline" href="/profesor/listas">
+                <Link className="font-semibold text-teal-800 underline" href="/profesor/listas">
                   Listas semestrales por grupo
-                </a>
+                </Link>
               )}
             </div>
             <ReportsPanel
