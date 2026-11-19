@@ -34,8 +34,37 @@ BEGIN
  UPDATE public.sessions SET status='CERRADA' WHERE code='TEST-SESSION';
  IF public.coordination_day(day_of_class)#>>'{sessions,0,absences}' IS DISTINCT FROM '1'
  THEN RAISE EXCEPTION 'Unexpected closed-session absences'; END IF;
+ DECLARE report jsonb; gid uuid; yr int := extract(year from day_of_class); half int := case when extract(month from day_of_class)<=6 then 1 else 2 end;
+ BEGIN
+ SELECT id INTO gid FROM public.school_groups WHERE normalized_name='TESTA';
+ report:=public.semester_register(gid,yr,half);
+ IF jsonb_array_length(report->'classes') IS DISTINCT FROM 1 OR
+ NOT EXISTS(SELECT 1 FROM jsonb_array_elements(report->'students') s WHERE s->>'name'='Test Student' AND s->>'attended'='1' AND s->>'total'='1') OR
+ NOT EXISTS(SELECT 1 FROM jsonb_array_elements(report->'students') s WHERE s->>'name'='QR Student' AND s->>'absent'='1') THEN RAISE EXCEPTION 'Invalid semester totals'; END IF;
  UPDATE public.sessions SET status='ABIERTA' WHERE code='TEST-SESSION';
+ report:=public.semester_register(gid,yr,half);
+ IF jsonb_array_length(report->'classes')<>0 OR EXISTS(SELECT 1 FROM jsonb_array_elements(report->'students') s WHERE s->>'total'<>'0') THEN RAISE EXCEPTION 'Reopened class still counted'; END IF;
+ END;
 END $$;
+SAVEPOINT semester_scenarios;
+UPDATE public.students SET group_name='TEST-B' WHERE document='TEST90002';
+INSERT INTO public.sessions(code,teacher_id,subject,group_name,date,start_time,end_time,is_test)
+ SELECT code,auth.uid(),'Course','TESTA',(now() AT TIME ZONE 'America/Bogota')::date,'00:00','23:59',code='PRACTICE'
+ FROM (VALUES('SECOND'),('PRACTICE')) v(code);
+SELECT public.record_manual_attendance(id,'TEST90001','TARDE','Traffic') FROM public.sessions WHERE code='SECOND';
+SELECT public.record_manual_attendance(id,'TEST90002','JUSTIFICADO','Family') FROM public.sessions WHERE code='TEST-SESSION';
+UPDATE public.sessions SET status='CERRADA' WHERE code IN ('PRACTICE','SECOND','TEST-SESSION');
+DO $$
+DECLARE d date := (now() AT TIME ZONE 'America/Bogota')::date; book jsonb;
+BEGIN
+ book:=public.semester_register((SELECT id FROM public.school_groups WHERE normalized_name='TESTA'),extract(year from d)::int,CASE WHEN extract(month from d)<=6 THEN 1 ELSE 2 END);
+ IF jsonb_array_length(book->'classes') IS DISTINCT FROM 2 OR
+ NOT EXISTS(SELECT 1 FROM jsonb_array_elements(book->'students') s WHERE s->>'name'='QR Student' AND s->>'total'='1' AND s->>'excused'='1' AND s->>'absent'='0') OR
+ NOT EXISTS(SELECT 1 FROM jsonb_array_elements(book->'students') s WHERE s->>'name'='Test Student' AND s->>'total'='2' AND s->>'attended'='2')
+ THEN RAISE EXCEPTION 'Semester transfer, lateness, excused absence or practice isolation failed'; END IF;
+ BEGIN UPDATE public.sessions SET is_test=true WHERE code='SECOND'; RAISE EXCEPTION 'Reclassified real session'; EXCEPTION WHEN check_violation THEN NULL; END;
+END $$;
+ROLLBACK TO SAVEPOINT semester_scenarios;
 SELECT set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000001',true);
 
 -- Force the audit trigger to fail; the attendance must not survive its subtransaction.

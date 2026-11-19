@@ -58,6 +58,7 @@ export default function TeacherPanelPage() {
     groupName: "",
     ...sessionWindow(),
     startNow: true,
+    isTest: false,
   }));
   const [creating, setCreating] = useState(false);
 
@@ -290,7 +291,7 @@ export default function TeacherPanelPage() {
     }
   };
 
-  const handleManualAttendance = async (documentToMark?: string) => {
+  const handleManualAttendance = async (documentToMark?: string, status = "PRESENTE") => {
     const doc = (documentToMark || manualDocument).trim();
     if (!doc || !selectedSessionId || manualSubmitting) return;
 
@@ -302,6 +303,7 @@ export default function TeacherPanelPage() {
         body: JSON.stringify({
           sessionId: selectedSessionId,
           document: doc,
+          status,
           notes: manualNote || "Marcado manual docente",
         }),
       });
@@ -360,11 +362,15 @@ export default function TeacherPanelPage() {
     }
   };
 
+  const [exporting, setExporting] = useState(false);
   const exportReportsCsv = async () => {
+    if (exporting) return;
+    setExporting(true);
     setReportsError("");
     try {
       const response = await fetch(
-        "/api/reports/export?" + new URLSearchParams(reportFilters).toString(),
+        "/api/reports/export?" +
+          new URLSearchParams({ ...reportFilters, layout: "list" }).toString(),
       );
       if (!response.ok) {
         const data = await response.json();
@@ -375,11 +381,13 @@ export default function TeacherPanelPage() {
         url = URL.createObjectURL(blob),
         link = document.createElement("a");
       link.href = url;
-      link.download = "asistencia.csv";
+      link.download = `lista-asistencia_${reportFilters.dateFrom}_${reportFilters.dateTo}.csv`;
       link.click();
       URL.revokeObjectURL(url);
     } catch {
       setReportsError("La descarga fue interrumpida. Intenta de nuevo.");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -583,7 +591,12 @@ export default function TeacherPanelPage() {
                 </button>
                 <button
                   onClick={() => {
-                    setCreateForm((form) => ({ ...form, ...sessionWindow(), startNow: true }));
+                    setCreateForm((form) => ({
+                      ...form,
+                      ...sessionWindow(),
+                      startNow: true,
+                      isTest: false,
+                    }));
                     setShowCreateModal(true);
                     void loadAcademic();
                   }}
@@ -650,6 +663,7 @@ export default function TeacherPanelPage() {
                       </div>
                       <h3 className="font-bold text-base text-slate-900 group-hover:text-teal-700 transition-colors">
                         {ses.subject}
+                        {ses.isTest && <span className="ml-2 text-xs text-amber-800">Prueba</span>}
                       </h3>
                       <p className="text-xs text-slate-600 mt-1">
                         Grupo <span className="text-slate-700 font-semibold">{ses.groupName}</span>{" "}
@@ -665,7 +679,7 @@ export default function TeacherPanelPage() {
                         <Users className="w-3.5 h-3.5 text-slate-500" />
                         <span>
                           <strong className="text-slate-900">{ses.presents}</strong> / {ses.total}{" "}
-                          presentes
+                          registrados
                         </span>
                       </div>
                       <span className="text-teal-700 text-xs font-medium group-hover:translate-x-0.5 transition-transform">
@@ -681,15 +695,25 @@ export default function TeacherPanelPage() {
 
         {/* PESTAÑA: REPORTES */}
         {activeTab === "reportes" && (
-          <ReportsPanel
-            reports={reports}
-            loadingReports={loadingReports}
-            reportsError={reportsError}
-            reportFilters={reportFilters}
-            setReportFilters={setReportFilters}
-            loadReports={() => loadReports()}
-            exportReportsCsv={exportReportsCsv}
-          />
+          <>
+            <div className="mb-6">
+              {userProfile?.role === "admin" && (
+                <a className="font-semibold text-teal-800 underline" href="/profesor/listas">
+                  Listas semestrales por grupo
+                </a>
+              )}
+            </div>
+            <ReportsPanel
+              reports={reports}
+              loadingReports={loadingReports}
+              reportsError={reportsError}
+              reportFilters={reportFilters}
+              setReportFilters={setReportFilters}
+              loadReports={() => loadReports()}
+              exporting={exporting}
+              exportReportsCsv={exportReportsCsv}
+            />
+          </>
         )}
 
         {/* PESTAÑA: IMPORTADOR MASIVO */}
@@ -820,6 +844,14 @@ export default function TeacherPanelPage() {
                 </div>
               </div>
 
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={createForm.isTest}
+                  onChange={(e) => setCreateForm({ ...createForm, isTest: e.target.checked })}
+                />
+                Sesión de prueba (excluir de reportes)
+              </label>
               <label className="flex items-start gap-2 text-sm text-slate-700">
                 <input
                   type="checkbox"

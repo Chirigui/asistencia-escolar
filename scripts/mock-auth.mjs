@@ -73,6 +73,48 @@ http
       return send(res, 200, { allowed: true, retryAfterSeconds: 1 });
     if (!tokens.has(token)) return send(res, 401, { message: "Not authenticated" });
     const role = tokens.get(token).email === "admin@example.invalid" ? "admin" : "teacher";
+    if (url.pathname === "/rest/v1/attendances") {
+      const record = {
+        id: "ffffffff-0000-4000-8000-000000000001",
+        registered_at: "2026-11-18T12:03:00Z",
+        status: "PRESENTE",
+        method: "QR",
+        session: { code: "DEMO01", subject: "Ciencias", group_name: "6A", date: "2026-11-18" },
+        roster: { document: "00123", full_name: "Ana Beltrán", grade: "6", group_name: "6A" },
+      };
+      return send(res, 200, [record], { "Content-Range": "0-0/1" });
+    }
+    if (url.pathname === "/rest/v1/rpc/semester_register")
+      return send(
+        res,
+        200,
+        role === "admin"
+          ? {
+              groupName: "6A",
+              historical: false,
+              classes: [
+                {
+                  id: "s1",
+                  date: "2026-11-18",
+                  time: "08:00",
+                  subject: "Ciencias",
+                  code: "DEMO01",
+                },
+              ],
+              students: [
+                {
+                  id: "a1",
+                  name: "Ana Beltrán",
+                  attended: 1,
+                  absent: 0,
+                  excused: 0,
+                  total: 1,
+                  marks: { s1: "TARDE" },
+                },
+              ],
+            }
+          : null,
+      );
     if (url.pathname === "/rest/v1/profiles") return send(res, 200, [{ role }]);
     if (url.pathname === "/rest/v1/school_groups") return send(res, 200, [group]);
     if (

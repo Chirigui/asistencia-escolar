@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { parseReportFilters, reportQuery, reportRow, type RawReport } from "@/lib/report-data";
+import { attendanceListWriter, listHeaders, listLine } from "@/lib/attendance-list";
 import { escapeCsvCell } from "@/lib/csv";
 import type { Cursor } from "@/lib/pagination";
 import { logError } from "@/lib/observability";
@@ -8,7 +9,10 @@ export async function GET(request: Request) {
   const auth = await requireStaff();
   if (!auth.ok) return auth.response;
   try {
-    const filters = parseReportFilters(new URL(request.url).searchParams);
+    const params = new URL(request.url).searchParams;
+    const filters = parseReportFilters(params);
+    const classList = params.get("layout") === "list";
+    const writeListRow = attendanceListWriter();
     if (
       !filters.dateFrom ||
       !filters.dateTo ||
@@ -35,22 +39,29 @@ export async function GET(request: Request) {
           if (sent === 0)
             controller.enqueue(
               encoder.encode(
-                "\uFEFFSesion,Fecha,Hora,Documento,Estudiante,Grado,Grupo,Materia,Metodo,Estado\r\n",
+                classList
+                  ? "\uFEFF" + listLine(listHeaders) + "\r\n"
+                  : "\uFEFFSesion,Fecha,Hora,Documento,Estudiante,Grado,Grupo,Materia,Metodo,Estado\r\n",
               ),
             );
-          const { data, error } = await reportQuery(
+          const query = reportQuery(
             auth.ctx.supabase,
             filters,
             cursor,
             false,
             asOf,
-          ).limit(500);
+            classList ? "class-list" : "recent",
+          );
+          const { data, error } = await (classList
+            ? query.range(sent, sent + 499)
+            : query.limit(500));
           if (error) throw error;
           const rows = (data || []) as unknown as RawReport[];
           if (sent + rows.length > 100000) throw new Error("Export row limit");
           const text = rows
             .map((raw) => {
               const r = reportRow(raw);
+              if (classList) return writeListRow(r);
               return [
                 r.sessionCode,
                 r.date,
@@ -74,7 +85,7 @@ export async function GET(request: Request) {
           sent += rows.length;
           const last = rows.at(-1);
           if (rows.length < 500 || !last) controller.close();
-          else cursor = { timestamp: last.registered_at, id: last.id };
+          else if (!classList) cursor = { timestamp: last.registered_at, id: last.id };
         } catch (error) {
           logError("reports.export", error, request.headers.get("x-request-id"));
           controller.error(new Error("Export interrupted"));
@@ -84,7 +95,9 @@ export async function GET(request: Request) {
     return new Response(stream, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": 'attachment; filename="asistencia.csv"',
+        "Content-Disposition": classList
+          ? `attachment; filename="lista-asistencia_${filters.dateFrom}_${filters.dateTo}.csv"`
+          : 'attachment; filename="asistencia.csv"',
         "Cache-Control": "private, no-store",
         "X-Report-As-Of": asOf,
       },

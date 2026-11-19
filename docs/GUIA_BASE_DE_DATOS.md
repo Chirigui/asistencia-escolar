@@ -47,11 +47,13 @@ Se normalizan los documentos y grupos para evitar diferencias por espacios o gui
 En Organización → Pruebas y limpieza hay dos acciones:
 
 - **Limpiar caché de este navegador:** solicita al navegador borrar su caché HTTP del sitio y elimina Cache Storage del mismo origen. El soporte de caché HTTP depende del navegador. Conserva cookies de acceso y no afecta a otros dispositivos, Supabase ni la caché global de Vercel. Los datos escolares usan `no-store`.
-- **Borrar sesiones, asistencias e incidencias:** elimina globalmente esos registros y el padrón de las sesiones eliminadas. Requiere administrador, modo de pruebas habilitado y escribir `BORRAR SESIONES DE PRUEBA`. No hay deshacer desde la web. Se conserva el historial de seguridad, incluidos motivos de registros manuales y la constancia de la limpieza; no se promete borrar todo rastro del sistema.
+- **Borrar sesiones de prueba** elimina las clases identificadas como prueba al crearlas y sus registros vinculados. Organización muestra el número de sesiones elegibles. La cuenta administradora confirma con `BORRAR SESIONES DE PRUEBA`. Las sesiones anteriores a la incorporación de la marca se consideran reales.
+- `ENABLE_TEST_CLEANUP=true` habilita esta acción en el servidor tras instalar la migración de listas semestrales. La clasificación de una clase es permanente.
 
-**La limpieza conserva todos los estudiantes, incluso los estudiantes de ejemplo que ya existan.** Antes de usar la lista oficial, marca como INACTIVO a los alumnos ficticios desde Organización. Si necesitas borrarlos definitivamente, eso requiere una operación separada y revisar sus relaciones; el botón solicitado no los borra. También conserva cuentas, períodos, grupos, matrículas y asignaciones.
+## Listas semestrales por grupo
 
-Antes de usar datos reales, cambia `ENABLE_TEST_CLEANUP` a `false` en Vercel para Production y vuelve a desplegar. Comprueba que el botón quede deshabilitado. La clave es sólo del servidor; no lleva prefijo `NEXT_PUBLIC_`. Los límites de solicitudes y protecciones no se reinician con la limpieza.
+En Reportes → Listas semestrales por grupo, administración elige año, semestre y grupo. El enlace permanece estable. La pantalla actualiza los datos al volver a la pestaña y cada minuto mientras está visible. Descargar Excel genera una copia del último estado de la base.
+Cada clase real cerrada o finalizada cuenta como una reunión para los estudiantes de su padrón. El porcentaje divide las presencias y tardanzas entre las reuniones correspondientes, incluidas las ausencias justificadas. Las clases reabiertas vuelven a contar al cerrarlas.
 
 ## Cómo funciona el horario de diez minutos
 

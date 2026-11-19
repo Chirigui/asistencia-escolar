@@ -25,6 +25,7 @@ interface SessionRecord {
   end_time: string;
   status: string;
   created_at: string;
+  is_test: boolean;
   attendances?: Array<{ count: number }> | null;
 }
 
@@ -40,7 +41,7 @@ export async function GET(request: Request) {
     const cursor = decodeCursor(new URL(request.url).searchParams.get("cursor"));
     let query = auth.ctx.supabase
       .from("sessions")
-      .select("id,code,subject,group_name,date,start_time,end_time,status,created_at")
+      .select("id,code,subject,group_name,date,start_time,end_time,status,created_at,is_test")
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .limit(51);
@@ -70,6 +71,7 @@ export async function GET(request: Request) {
         startTime: r.start_time,
         endTime: r.end_time,
         status: r.status,
+        isTest: r.is_test,
         presents: Number(byId.get(r.id)?.presents || 0),
         total: Number(byId.get(r.id)?.total || 0),
       })),
@@ -151,6 +153,7 @@ export async function POST(request: Request) {
           end_time: endTime,
           status: "ABIERTA",
           qr_token_required: true,
+          is_test: body.isTest === true,
           ...(window
             ? {
                 registration_opens_at: window.registration_opens_at,

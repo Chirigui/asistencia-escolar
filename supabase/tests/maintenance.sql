@@ -3,8 +3,8 @@ BEGIN;
 INSERT INTO auth.users(id,email) VALUES ('70000000-0000-4000-8000-000000000001','cleanup-teacher@example.invalid'),('70000000-0000-4000-8000-000000000002','cleanup-admin@example.invalid');
 UPDATE public.profiles SET role='admin' WHERE id='70000000-0000-4000-8000-000000000002';
 INSERT INTO public.students(id,document,document_normalized,full_name,grade,group_name) VALUES ('80000000-0000-4000-8000-000000000001','CLEANUP001','CLEANUP001','Synthetic Student','TEST','CLEANUPTEST');
-INSERT INTO public.sessions(code,teacher_id,subject,group_name,date,start_time,end_time,registration_opens_at,registration_closes_at)
-SELECT 'WINDOW-'||n,'70000000-0000-4000-8000-000000000001','Test','CLEANUPTEST',(now() AT TIME ZONE 'America/Bogota')::date,'00:00','23:59',clock_timestamp()+start_offset,clock_timestamp()+end_offset
+INSERT INTO public.sessions(code,teacher_id,subject,group_name,date,start_time,end_time,registration_opens_at,registration_closes_at,is_test)
+SELECT 'WINDOW-'||n,'70000000-0000-4000-8000-000000000001','Test','CLEANUPTEST',(now() AT TIME ZONE 'America/Bogota')::date,'00:00','23:59',clock_timestamp()+start_offset,clock_timestamp()+end_offset,true
 FROM (VALUES(1,interval '-20 minutes',interval '-10 minutes'),(2,interval '10 minutes',interval '20 minutes'),(3,interval '-1 minute',interval '9 minutes')) AS cases(n,start_offset,end_offset);
 INSERT INTO public.sessions(code,teacher_id,subject,group_name,date,start_time,end_time)
 VALUES('MIDNIGHT','70000000-0000-4000-8000-000000000001','Test','CLEANUPTEST',(now() AT TIME ZONE 'America/Bogota')::date,'23:55','00:05');
@@ -35,7 +35,7 @@ SET LOCAL ROLE service_role;
 SELECT public.clear_test_activity('70000000-0000-4000-8000-000000000002','BORRAR SESIONES DE PRUEBA');
 RESET ROLE;
 DO $$ BEGIN
- IF EXISTS(SELECT 1 FROM public.sessions) OR EXISTS(SELECT 1 FROM public.attendances) OR EXISTS(SELECT 1 FROM public.incidents) OR EXISTS(SELECT 1 FROM public.session_roster) THEN RAISE EXCEPTION 'FAIL activity remains'; END IF;
+ IF EXISTS(SELECT 1 FROM public.sessions WHERE is_test) OR EXISTS(SELECT 1 FROM public.attendances) OR NOT EXISTS(SELECT 1 FROM public.sessions WHERE code='MIDNIGHT') OR NOT EXISTS(SELECT 1 FROM public.session_roster r JOIN public.sessions s ON s.id=r.session_id WHERE s.code='MIDNIGHT') THEN RAISE EXCEPTION 'FAIL activity remains'; END IF;
  IF EXISTS(SELECT 1 FROM retained_counts WHERE students<>(SELECT count(*) FROM public.students) OR profiles<>(SELECT count(*) FROM public.profiles) OR assignments<>(SELECT count(*) FROM public.teaching_assignments) OR enrollments<>(SELECT count(*) FROM public.enrollments) OR groups<>(SELECT count(*) FROM public.school_groups)) THEN RAISE EXCEPTION 'FAIL school data changed'; END IF;
  IF NOT EXISTS(SELECT 1 FROM public.audit_events WHERE action='test_activity.clear' AND actor_id='70000000-0000-4000-8000-000000000002') THEN RAISE EXCEPTION 'FAIL cleanup not audited'; END IF;
  IF NOT EXISTS(SELECT 1 FROM public.audit_events WHERE action='attendances.insert') THEN RAISE EXCEPTION 'FAIL security history removed'; END IF;

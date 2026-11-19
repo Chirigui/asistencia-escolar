@@ -14,7 +14,7 @@ interface Props {
   statusUpdating: boolean;
   manualDocument: string;
   setManualDocument: Dispatch<SetStateAction<string>>;
-  handleManualAttendance: (document?: string) => void;
+  handleManualAttendance: (document?: string, status?: string) => void;
   manualSubmitting: boolean;
   searchFilter: string;
   setSearchFilter: Dispatch<SetStateAction<string>>;
@@ -40,6 +40,7 @@ export default function SessionDialog({
   setManualNote,
 }: Props) {
   useDialogFocus(() => setSelectedSessionId(null));
+  const [markStatus, setMarkStatus] = useState("PRESENTE");
   const [showAudit, setShowAudit] = useState(false);
   return (
     <div
@@ -149,7 +150,7 @@ export default function SessionDialog({
                     </p>
                   </div>
                   <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                    <p className="text-[10px] text-slate-500">Presentes</p>
+                    <p className="text-[10px] text-slate-500">Registrados</p>
                     <p className="text-base font-bold text-emerald-700">
                       {sessionDetail.stats.presentsCount}
                     </p>
@@ -166,7 +167,18 @@ export default function SessionDialog({
 
                 {/* Marcado Manual Rápido */}
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4 text-xs">
-                  <p className="font-semibold text-slate-600 mb-2">Marcado Manual Docente</p>
+                  <label className="block mb-2">
+                    Estado del registro manual
+                    <select
+                      className="block p-2 border rounded-lg"
+                      value={markStatus}
+                      onChange={(e) => setMarkStatus(e.target.value)}
+                    >
+                      <option value="PRESENTE">Presente</option>
+                      <option value="TARDE">Llegada tarde</option>
+                      <option value="JUSTIFICADO">Ausencia justificada</option>
+                    </select>
+                  </label>
                   <div className="flex gap-2">
                     <input
                       type="text"
@@ -178,13 +190,13 @@ export default function SessionDialog({
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
                           event.preventDefault();
-                          handleManualAttendance();
+                          handleManualAttendance(undefined, markStatus);
                         }
                       }}
                       className="flex-1 p-2 bg-white border border-slate-200 rounded-lg text-slate-900"
                     />
                     <button
-                      onClick={() => handleManualAttendance()}
+                      onClick={() => handleManualAttendance(undefined, markStatus)}
                       disabled={
                         manualSubmitting ||
                         !manualDocument.trim() ||
@@ -232,7 +244,14 @@ export default function SessionDialog({
                       >
                         <div>
                           <p className="font-bold text-emerald-800">{p.fullName}</p>
-                          <p className="text-[10px] text-slate-500 font-mono">{p.document}</p>
+                          <p className="text-[10px] text-slate-500 font-mono">
+                            {p.document} ·{" "}
+                            {p.status === "JUSTIFICADO"
+                              ? "Ausencia justificada"
+                              : p.status === "TARDE"
+                                ? "Llegada tarde"
+                                : "Presente"}
+                          </p>
                         </div>
                         <span className="text-[10px] font-mono text-emerald-700">
                           {new Date(p.registeredAt).toLocaleTimeString().slice(0, 5)}
@@ -254,10 +273,10 @@ export default function SessionDialog({
                         </div>
                         <button
                           disabled={manualSubmitting || sessionDetail.session.status !== "ABIERTA"}
-                          onClick={() => handleManualAttendance(a.document)}
+                          onClick={() => handleManualAttendance(a.document, markStatus)}
                           className="px-2 py-1 bg-slate-100 hover:bg-teal-700 hover:text-white rounded text-[10px] text-slate-600  transition-colors"
                         >
-                          + Presente
+                          Registrar
                         </button>
                       </div>
                     ))}

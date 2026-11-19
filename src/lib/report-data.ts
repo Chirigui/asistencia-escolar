@@ -39,15 +39,28 @@ export function reportQuery(
   cursor: Cursor | null,
   head = false,
   asOf?: string,
+  order: "recent" | "class-list" = "recent",
 ) {
   let query = client
     .from("attendances")
     .select(
       "id,registered_at,status,method,roster:session_roster!attendances_roster_fkey!inner(document,document_normalized,full_name,grade,group_name),session:sessions!inner(code,subject,group_name,date)",
       { count: head ? "exact" : undefined, head },
-    )
-    .order("registered_at", { ascending: false })
-    .order("id", { ascending: false });
+    );
+  query = query.eq("session.is_test", false);
+  if (!head) {
+    if (order === "class-list") {
+      query = query
+        .order("session(date)")
+        .order("session(group_name)")
+        .order("session(subject)")
+        .order("session(code)")
+        .order("roster(full_name)")
+        .order("id");
+    } else {
+      query = query.order("registered_at", { ascending: false }).order("id", { ascending: false });
+    }
+  }
   if (filters.dateFrom) query = query.gte("session.date", filters.dateFrom);
   if (filters.dateTo) query = query.lte("session.date", filters.dateTo);
   if (filters.groupName) query = query.eq("session.group_name", filters.groupName);

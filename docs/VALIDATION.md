@@ -13,7 +13,7 @@ La versión local pasó las verificaciones para una demostración con matrícula
 
 ### Preparación de la instalación
 
-1. Usar un entorno propio del nuevo colegio. Antes de cargar la matrícula comprobar cuentas, permisos y padrón. Mantener `ENABLE_TEST_CLEANUP=false` durante la operación escolar. La función de limpieza incluye todas las sesiones anteriores a su ejecución.
+1. Usar un entorno propio del nuevo colegio. Antes de cargar la matrícula comprobar cuentas, permisos y padrón. Con la migración semestral, la limpieza sólo incluye sesiones marcadas como prueba.
 2. Aplicar en orden las dos migraciones del 18 de noviembre en el entorno de piloto. Configurar nombre, escudo local opcional y color mediante las tres variables `NEXT_PUBLIC_SCHOOL_*` de `.env.example` antes de compilar.
 3. En Coordinación, con cuenta administradora, elegir fecha y grupos esperados. La selección se comparte por fecha para toda la institución. Un grupo con clase iniciada sale de pendientes. Una clase abierta muestra registro en curso y una cerrada calcula faltantes de su propio padrón. Si se reabre, las ausencias vuelven a quedar pendientes de cierre.
 4. Ensayar con docentes del colegio la creación de clases simultáneas, registro desde su red, cierre y exportación. Acordar el volumen de alumnos esperado y medir errores y tiempos de espera en esa jornada antes de ofrecer garantías comerciales.
