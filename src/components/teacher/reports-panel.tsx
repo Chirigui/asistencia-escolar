@@ -10,6 +10,7 @@ interface Props {
   reportFilters: { dateFrom: string; dateTo: string; groupName: string; subject: string };
   setReportFilters: Dispatch<SetStateAction<Props["reportFilters"]>>;
   loadReports: () => void;
+  exporting: boolean;
   exportReportsCsv: () => void;
 }
 export default function ReportsPanel({
@@ -19,6 +20,7 @@ export default function ReportsPanel({
   reportFilters,
   setReportFilters,
   loadReports,
+  exporting,
   exportReportsCsv,
 }: Props) {
   return (
@@ -28,17 +30,18 @@ export default function ReportsPanel({
           <p className="eyebrow mb-2">{school.name}</p>
           <h2 className="text-3xl font-bold tracking-tight">Reportes de Asistencia</h2>
           <p className="text-xs text-slate-600">
-            Filtra por fechas, grupo y materias, y exporta en formato CSV para Excel.
+            Elige ambas fechas para descargar la asistencia registrada. La lista reúne cada clase y
+            ordena sus estudiantes por nombre.
           </p>
         </div>
 
         <button
           onClick={exportReportsCsv}
-          disabled={reports.length === 0}
-          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-100 disabled:text-slate-600 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all text-slate-900"
+          disabled={exporting || !reportFilters.dateFrom || !reportFilters.dateTo}
+          className="px-4 py-2.5 bg-teal-700 hover:bg-teal-800 disabled:bg-slate-100 disabled:text-slate-600 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all text-white"
         >
           <Download className="w-4 h-4" />
-          <span>Exportar CSV</span>
+          <span>{exporting ? "Preparando lista…" : "Descargar lista CSV"}</span>
         </button>
       </div>
 

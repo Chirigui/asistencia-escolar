@@ -1,4 +1,5 @@
 export interface SessionListItem {
+  isTest: boolean;
   id: string;
   code: string;
   subject: string;

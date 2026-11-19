@@ -8,21 +8,19 @@ import { isSameOriginRequest } from "@/lib/request-origin";
 export async function GET() {
   const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
-  const tables = ["sessions", "attendances", "incidents"] as const;
-  const results = await Promise.all(
-    tables.map((table) =>
-      auth.ctx.supabase.from(table).select("id", { count: "exact", head: true }),
-    ),
-  );
-  if (results.some((r) => r.error))
+  const { count, error } = await auth.ctx.supabase
+    .from("sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("is_test", true);
+  if (error)
     return NextResponse.json(
-      { success: false, message: "No se pudieron cargar los recuentos." },
+      { success: false, message: "No se pudo consultar el número de sesiones de prueba." },
       { status: 500 },
     );
   return NextResponse.json({
     success: true,
     enabled: process.env.ENABLE_TEST_CLEANUP === "true",
-    counts: Object.fromEntries(tables.map((table, i) => [table, results[i].count || 0])),
+    counts: { sessions: count },
   });
 }
 
@@ -48,7 +46,7 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   try {
-    const { data, error } = await createAdminClient().rpc("clear_test_activity", {
+    const { data, error } = await createAdminClient().rpc("clear_marked_test_activity", {
       p_actor: auth.ctx.userId,
       p_confirmation: body.confirmation,
     });
@@ -57,8 +55,7 @@ export async function POST(request: Request) {
       {
         success: true,
         counts: data,
-        message:
-          "Sesiones, asistencias e incidencias eliminadas. Estudiantes y configuración conservados.",
+        message: `Se eliminaron ${data.sessions} sesiones de prueba.`,
       },
       { headers: { "Clear-Site-Data": '"cache"' } },
     );

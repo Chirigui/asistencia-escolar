@@ -82,14 +82,11 @@ export default function MaintenancePanel({ onCleared }: { onCleared: () => void 
         Limpiar caché de este navegador
       </button>
       <p className="text-sm text-slate-700">
-        Datos que se eliminarán para todos los docentes: {counts.sessions ?? "…"} sesiones,{" "}
-        {counts.attendances ?? "…"} asistencias y {counts.incidents ?? "…"} incidencias.
+        Sesiones marcadas para borrar: {counts.sessions ?? "…"}.
       </p>
       <p className="text-sm text-slate-600">
-        Se conservan todos los estudiantes, matrículas, grupos, asignaciones, períodos y cuentas. El
-        historial de seguridad se conserva, incluidos los motivos de registros manuales. No hay
-        deshacer: guarda un respaldo antes. Estos recuentos pueden cambiar si otra persona registra
-        datos.
+        Al confirmar se eliminan las sesiones marcadas como prueba y sus registros asociados. Esta
+        operación es permanente.
       </p>
       {!enabled && ready && (
         <p className="text-sm text-slate-600">
@@ -108,11 +105,17 @@ export default function MaintenancePanel({ onCleared }: { onCleared: () => void 
       </label>
       <button
         type="button"
-        disabled={busy || !ready || !enabled || confirmation !== "BORRAR SESIONES DE PRUEBA"}
+        disabled={
+          busy ||
+          !ready ||
+          !enabled ||
+          !counts.sessions ||
+          confirmation !== "BORRAR SESIONES DE PRUEBA"
+        }
         onClick={() => void run("clear")}
         className="px-4 py-3 bg-rose-700 text-white rounded-xl disabled:opacity-50"
       >
-        {busy ? "Procesando…" : "Borrar sesiones, asistencias e incidencias"}
+        {busy ? "Procesando…" : "Borrar sesiones de prueba"}
       </button>
       {message && (
         <p role="status" className="text-sm p-3 bg-slate-100 rounded-xl">
